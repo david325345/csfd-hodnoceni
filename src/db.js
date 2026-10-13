@@ -6,6 +6,7 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS wd_map (
   imdb TEXT NOT NULL,
   csfd INTEGER NOT NULL,
+  item TEXT,
   PRIMARY KEY (imdb, csfd)
 );
 CREATE TABLE IF NOT EXISTS own_map (
@@ -44,12 +45,26 @@ export function openDb(path) {
   db.exec('PRAGMA synchronous = NORMAL');
   db.exec(SCHEMA);
 
-  const st = {
+  // Migrace: starší verze neměla u párů Q-ID položky Wikidat. Bez něj nejde
+  // přírůstková aktualizace, proto se sloupec přidá a vynutí se plné stažení.
+  const cols = db.prepare('PRAGMA table_info(wd_map)').all().map((c) => c.name);
+  if (!cols.includes('item')) {
+    db.exec('ALTER TABLE wd_map ADD COLUMN item TEXT');
+    db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run('wd_last_full', '0');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS wd_map_item ON wd_map (item)');
+
+  const prepareWd = () => ({
     wdGet: db.prepare('SELECT csfd FROM wd_map WHERE imdb = ? ORDER BY csfd'),
     wdCount: db.prepare('SELECT COUNT(*) AS n FROM wd_map'),
     wdAmbiguous: db.prepare(
       'SELECT COUNT(*) AS n FROM (SELECT imdb FROM wd_map GROUP BY imdb HAVING COUNT(*) > 1)'
     ),
+    wdDelItem: db.prepare('DELETE FROM wd_map WHERE item = ?'),
+    wdIns: db.prepare('INSERT OR REPLACE INTO wd_map (imdb, csfd, item) VALUES (?, ?, ?)')
+  });
+
+  const st = {
     ownGet: db.prepare('SELECT * FROM own_map WHERE imdb = ?'),
     ownPut: db.prepare(
       `INSERT OR REPLACE INTO own_map (imdb, csfd, title, year, matched_by, created_at)
@@ -67,7 +82,8 @@ export function openDb(path) {
     ),
     ratingCount: db.prepare('SELECT COUNT(*) AS n FROM rating'),
     kvGet: db.prepare('SELECT value FROM kv WHERE key = ?'),
-    kvPut: db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)')
+    kvPut: db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)'),
+    ...prepareWd()
   };
 
   return {
@@ -77,29 +93,47 @@ export function openDb(path) {
     wdAmbiguousCount: () => st.wdAmbiguous.get().n,
 
     /**
-     * Nahradí celé Wikidata mapování v jedné transakci.
+     * Nahradí celé Wikidata mapování v jedné transakci (řádky [imdb, csfd, item]).
      * Při chybě zůstane staré mapování beze změny.
      */
-    replaceWdMap(pairs) {
+    replaceWdMap(rows) {
       db.exec('BEGIN');
       try {
         db.exec('DROP TABLE IF EXISTS wd_map_new');
-        db.exec('CREATE TABLE wd_map_new (imdb TEXT NOT NULL, csfd INTEGER NOT NULL, PRIMARY KEY (imdb, csfd))');
-        const ins = db.prepare('INSERT OR IGNORE INTO wd_map_new (imdb, csfd) VALUES (?, ?)');
-        for (const [imdb, csfd] of pairs) ins.run(imdb, csfd);
+        db.exec(
+          'CREATE TABLE wd_map_new (imdb TEXT NOT NULL, csfd INTEGER NOT NULL, item TEXT, PRIMARY KEY (imdb, csfd))'
+        );
+        const ins = db.prepare('INSERT OR IGNORE INTO wd_map_new (imdb, csfd, item) VALUES (?, ?, ?)');
+        for (const [imdb, csfd, item] of rows) ins.run(imdb, csfd, item ?? null);
         db.exec('DROP TABLE wd_map');
         db.exec('ALTER TABLE wd_map_new RENAME TO wd_map');
+        db.exec('CREATE INDEX IF NOT EXISTS wd_map_item ON wd_map (item)');
         db.exec('COMMIT');
       } catch (e) {
         db.exec('ROLLBACK');
         throw e;
       }
-      // Prepared statements odkazují na původní tabulku podle jména — po přejmenování znovu připravit.
-      st.wdGet = db.prepare('SELECT csfd FROM wd_map WHERE imdb = ? ORDER BY csfd');
-      st.wdCount = db.prepare('SELECT COUNT(*) AS n FROM wd_map');
-      st.wdAmbiguous = db.prepare(
-        'SELECT COUNT(*) AS n FROM (SELECT imdb FROM wd_map GROUP BY imdb HAVING COUNT(*) > 1)'
-      );
+      // Po přejmenování tabulky připravit dotazy znovu.
+      Object.assign(st, prepareWd());
+    },
+
+    /**
+     * Přírůstková změna: pro každou změněnou položku Wikidat smaže její staré
+     * páry a vloží aktuální. `items` = Map(item → [[imdb, csfd], ...]);
+     * prázdný seznam = položka už žádný platný pár nemá.
+     */
+    applyWdDelta(items) {
+      db.exec('BEGIN');
+      try {
+        for (const [item, pairs] of items) {
+          st.wdDelItem.run(item);
+          for (const [imdb, csfd] of pairs) st.wdIns.run(imdb, csfd, item);
+        }
+        db.exec('COMMIT');
+      } catch (e) {
+        db.exec('ROLLBACK');
+        throw e;
+      }
     },
 
     ownGet: (imdb) => st.ownGet.get(imdb),

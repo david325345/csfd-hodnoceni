@@ -68,7 +68,10 @@ export function createServer({ db, resolver, refresher, csfdClient, config, star
           wikidata: {
             pairs: db.wdCount(),
             imdbWithMultipleCsfd: db.wdAmbiguousCount(),
-            lastRefresh: ts('wd_last_refresh'),
+            lastFull: ts('wd_last_full'),
+            lastSync: ts('wd_last_sync'),
+            lastMode: db.kvGet('wd_last_mode'),
+            lastDeltaItems: db.kvGet('wd_last_delta_items') == null ? null : Number(db.kvGet('wd_last_delta_items')),
             lastAttempt: ts('wd_last_attempt'),
             lastError: db.kvGet('wd_last_error') || null,
             refreshRunning: refresher.running
@@ -87,9 +90,11 @@ export function createServer({ db, resolver, refresher, csfdClient, config, star
         if (!config.adminToken || req.headers.authorization !== `Bearer ${config.adminToken}`) {
           return send(res, 403, { error: 'forbidden' });
         }
+        const mode = url.searchParams.get('mode') === 'incremental' ? 'incremental' : 'full';
         const force = url.searchParams.get('force') === '1';
-        refresher.refresh({ force }); // běží na pozadí
-        return send(res, 202, { started: true, force });
+        if (refresher.running) return send(res, 409, { error: 'refresh already running' });
+        refresher.refresh({ mode, force }); // běží na pozadí
+        return send(res, 202, { started: true, mode, force });
       }
 
       return send(res, 404, { error: 'not found' });

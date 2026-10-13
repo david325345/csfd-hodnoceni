@@ -10,8 +10,10 @@ services:
     environment:
       - PORT=7020
       - DB_PATH=/data/csfd-ratings.db
-      - WIKIDATA_REFRESH_DAYS=7
-      - RATING_TTL_HOURS=24
+      - WIKIDATA_INCREMENTAL_DAYS=7
+      - WIKIDATA_FULL_REFRESH_DAYS=30
+      - RATING_TTL_OLD_DAYS=90
+      - RATING_TTL_NEW_DAYS=7
       - MISS_TTL_DAYS=7
       - CSFD_CONCURRENCY=2
       - CSFD_DELAY_MS=500

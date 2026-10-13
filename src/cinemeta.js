@@ -11,8 +11,21 @@ const toList = (v) => (Array.isArray(v) ? v : typeof v === 'string' && v ? v.spl
   .filter(Boolean);
 
 /**
+ * Odpověď Cinemety je platná jen tehdy, když vrácené IMDb ID odpovídá dotazu
+ * a typ odpovídá endpointu. Filmový endpoint totiž u seriálových ID občas vrací
+ * jiný titul nebo seriál označený jako film.
+ */
+export function isValidMeta(meta, imdbId, type) {
+  if (!meta || !meta.name) return false;
+  const id = meta.imdb_id || meta.id;
+  if (id && id !== imdbId) return false;
+  if (meta.type && meta.type !== type) return false;
+  return true;
+}
+
+/**
  * Vrátí { type: 'movie'|'series', name, year, directors[], cast[] } nebo null.
- * Typ z IMDb ID neznáme, proto se zkouší nejdřív film, pak seriál.
+ * Typ z IMDb ID neznáme, proto se zkouší film i seriál a bere se první platná odpověď.
  */
 export async function getMeta(imdbId, { fetchImpl = fetch, timeoutMs = 10_000 } = {}) {
   for (const type of ['movie', 'series']) {
@@ -24,7 +37,7 @@ export async function getMeta(imdbId, { fetchImpl = fetch, timeoutMs = 10_000 } 
       throw new Error(`Cinemeta HTTP ${res.status}`);
     }
     const meta = (await res.json())?.meta;
-    if (!meta || !meta.name) continue;
+    if (!isValidMeta(meta, imdbId, type)) continue;
     return {
       type,
       name: meta.name,

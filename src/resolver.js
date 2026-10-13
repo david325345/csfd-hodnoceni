@@ -6,6 +6,16 @@ const HOUR = 3600_000;
 const DAY = 24 * HOUR;
 const NON_TITLE_TYPES = new Set(['season', 'episode']);
 
+/**
+ * Platnost uloženého hodnocení: u starších titulů se hodnocení skoro nemění,
+ * u nových se ještě hýbe. Neznámý rok = jako nový.
+ */
+export function ratingTtlMs(year, nowMs, config) {
+  const currentYear = new Date(nowMs).getUTCFullYear();
+  const old = Number.isFinite(year) && year > 0 && currentYear - year > config.ratingOldAfterYears;
+  return (old ? config.ratingTtlOldDays : config.ratingTtlNewDays) * DAY;
+}
+
 export function createResolver({ db, csfdClient, getMeta, config, now = () => Date.now(), log = console.log }) {
   const inflight = new Map();
   const stats = {
@@ -23,7 +33,7 @@ export function createResolver({ db, csfdClient, getMeta, config, now = () => Da
   /** Hodnocení podle ČSFD ID, z cache nebo čerstvě. Vrací řádek tabulky rating. */
   async function getRating(csfdId) {
     const cached = db.ratingGet(csfdId);
-    if (cached && now() - cached.fetched_at < config.ratingTtlHours * HOUR) {
+    if (cached && now() - cached.fetched_at < ratingTtlMs(cached.year, now(), config)) {
       stats.ratingCacheHits++;
       return { row: cached, stale: false };
     }

@@ -1,0 +1,47 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { getMeta, isValidMeta } from '../src/cinemeta.js';
+
+// Podvržená Cinemeta: odpovědi podle typu endpointu.
+const fakeCinemeta = (byType) => async (url) => {
+  const type = url.includes('/meta/movie/') ? 'movie' : 'series';
+  const meta = byType[type];
+  if (meta === 404) return new Response('', { status: 404 });
+  return new Response(JSON.stringify({ meta: meta ?? {} }), { status: 200 });
+};
+
+test('isValidMeta odmítne jiné IMDb ID nebo jiný typ', () => {
+  assert.equal(isValidMeta({ name: 'X', id: 'tt1', type: 'movie' }, 'tt1', 'movie'), true);
+  assert.equal(isValidMeta({ name: 'Mirror', id: 'tt0072443', type: 'movie' }, 'tt0903747', 'movie'), false);
+  assert.equal(isValidMeta({ name: 'Game of Thrones', id: 'tt0944947', type: 'series' }, 'tt0944947', 'movie'), false);
+  assert.equal(isValidMeta({}, 'tt1', 'movie'), false);
+});
+
+test('seriálové ID: chybná filmová odpověď se přeskočí a vezme se seriál', async () => {
+  const meta = await getMeta('tt0903747', {
+    fetchImpl: fakeCinemeta({
+      movie: { id: 'tt0072443', imdb_id: 'tt0072443', type: 'movie', name: 'Mirror', year: '1975' },
+      series: { id: 'tt0903747', imdb_id: 'tt0903747', type: 'series', name: 'Breaking Bad', year: '2008–2013', cast: ['Bryan Cranston'] }
+    })
+  });
+  assert.equal(meta.type, 'series');
+  assert.equal(meta.name, 'Breaking Bad');
+  assert.equal(meta.year, 2008);
+});
+
+test('seriál vrácený filmovým endpointem jako series se nebere jako film', async () => {
+  const gotSeries = { id: 'tt0944947', type: 'series', name: 'Game of Thrones', year: '2011–2019' };
+  const meta = await getMeta('tt0944947', { fetchImpl: fakeCinemeta({ movie: gotSeries, series: gotSeries }) });
+  assert.equal(meta.type, 'series');
+});
+
+test('film projde hned z filmového endpointu', async () => {
+  const meta = await getMeta('tt0110912', {
+    fetchImpl: fakeCinemeta({
+      movie: { id: 'tt0110912', type: 'movie', name: 'Pulp Fiction', year: '1994', director: ['Quentin Tarantino'] },
+      series: 404
+    })
+  });
+  assert.equal(meta.type, 'movie');
+  assert.deepEqual(meta.directors, ['Quentin Tarantino']);
+});
