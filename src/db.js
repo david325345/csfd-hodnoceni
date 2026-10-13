@@ -1,0 +1,123 @@
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS wd_map (
+  imdb TEXT NOT NULL,
+  csfd INTEGER NOT NULL,
+  PRIMARY KEY (imdb, csfd)
+);
+CREATE TABLE IF NOT EXISTS own_map (
+  imdb       TEXT PRIMARY KEY,
+  csfd       INTEGER NOT NULL,
+  title      TEXT,
+  year       INTEGER,
+  matched_by TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS miss (
+  imdb     TEXT PRIMARY KEY,
+  reason   TEXT,
+  tried_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rating (
+  csfd         INTEGER PRIMARY KEY,
+  rating       INTEGER,
+  rating_count INTEGER,
+  color        TEXT,
+  title        TEXT,
+  year         INTEGER,
+  type         TEXT,
+  fetched_at   INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS kv (
+  key   TEXT PRIMARY KEY,
+  value TEXT
+);
+`;
+
+export function openDb(path) {
+  if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+  const db = new DatabaseSync(path);
+  if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA synchronous = NORMAL');
+  db.exec(SCHEMA);
+
+  const st = {
+    wdGet: db.prepare('SELECT csfd FROM wd_map WHERE imdb = ? ORDER BY csfd'),
+    wdCount: db.prepare('SELECT COUNT(*) AS n FROM wd_map'),
+    wdAmbiguous: db.prepare(
+      'SELECT COUNT(*) AS n FROM (SELECT imdb FROM wd_map GROUP BY imdb HAVING COUNT(*) > 1)'
+    ),
+    ownGet: db.prepare('SELECT * FROM own_map WHERE imdb = ?'),
+    ownPut: db.prepare(
+      `INSERT OR REPLACE INTO own_map (imdb, csfd, title, year, matched_by, created_at)
+       VALUES (@imdb, @csfd, @title, @year, @matched_by, @created_at)`
+    ),
+    ownCount: db.prepare('SELECT COUNT(*) AS n FROM own_map'),
+    missGet: db.prepare('SELECT * FROM miss WHERE imdb = ?'),
+    missPut: db.prepare('INSERT OR REPLACE INTO miss (imdb, reason, tried_at) VALUES (?, ?, ?)'),
+    missDel: db.prepare('DELETE FROM miss WHERE imdb = ?'),
+    missCount: db.prepare('SELECT COUNT(*) AS n FROM miss'),
+    ratingGet: db.prepare('SELECT * FROM rating WHERE csfd = ?'),
+    ratingPut: db.prepare(
+      `INSERT OR REPLACE INTO rating (csfd, rating, rating_count, color, title, year, type, fetched_at)
+       VALUES (@csfd, @rating, @rating_count, @color, @title, @year, @type, @fetched_at)`
+    ),
+    ratingCount: db.prepare('SELECT COUNT(*) AS n FROM rating'),
+    kvGet: db.prepare('SELECT value FROM kv WHERE key = ?'),
+    kvPut: db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)')
+  };
+
+  return {
+    raw: db,
+    wdCsfdIds: (imdb) => st.wdGet.all(imdb).map((r) => r.csfd),
+    wdCount: () => st.wdCount.get().n,
+    wdAmbiguousCount: () => st.wdAmbiguous.get().n,
+
+    /**
+     * Nahradí celé Wikidata mapování v jedné transakci.
+     * Při chybě zůstane staré mapování beze změny.
+     */
+    replaceWdMap(pairs) {
+      db.exec('BEGIN');
+      try {
+        db.exec('DROP TABLE IF EXISTS wd_map_new');
+        db.exec('CREATE TABLE wd_map_new (imdb TEXT NOT NULL, csfd INTEGER NOT NULL, PRIMARY KEY (imdb, csfd))');
+        const ins = db.prepare('INSERT OR IGNORE INTO wd_map_new (imdb, csfd) VALUES (?, ?)');
+        for (const [imdb, csfd] of pairs) ins.run(imdb, csfd);
+        db.exec('DROP TABLE wd_map');
+        db.exec('ALTER TABLE wd_map_new RENAME TO wd_map');
+        db.exec('COMMIT');
+      } catch (e) {
+        db.exec('ROLLBACK');
+        throw e;
+      }
+      // Prepared statements odkazují na původní tabulku podle jména — po přejmenování znovu připravit.
+      st.wdGet = db.prepare('SELECT csfd FROM wd_map WHERE imdb = ? ORDER BY csfd');
+      st.wdCount = db.prepare('SELECT COUNT(*) AS n FROM wd_map');
+      st.wdAmbiguous = db.prepare(
+        'SELECT COUNT(*) AS n FROM (SELECT imdb FROM wd_map GROUP BY imdb HAVING COUNT(*) > 1)'
+      );
+    },
+
+    ownGet: (imdb) => st.ownGet.get(imdb),
+    ownPut: (row) => st.ownPut.run(row),
+    ownCount: () => st.ownCount.get().n,
+
+    missGet: (imdb) => st.missGet.get(imdb),
+    missPut: (imdb, reason, ts) => st.missPut.run(imdb, reason, ts),
+    missDel: (imdb) => st.missDel.run(imdb),
+    missCount: () => st.missCount.get().n,
+
+    ratingGet: (csfd) => st.ratingGet.get(csfd),
+    ratingPut: (row) => st.ratingPut.run(row),
+    ratingCount: () => st.ratingCount.get().n,
+
+    kvGet: (key) => st.kvGet.get(key)?.value ?? null,
+    kvPut: (key, value) => st.kvPut.run(key, value == null ? null : String(value)),
+
+    close: () => db.close()
+  };
+}
