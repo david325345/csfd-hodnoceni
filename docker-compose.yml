@@ -1,0 +1,19 @@
+services:
+  csfd-ratings:
+    build: .
+    container_name: csfd-ratings
+    restart: unless-stopped
+    ports:
+      - "7020:7020"
+    volumes:
+      - ./data:/data
+    environment:
+      - PORT=7020
+      - DB_PATH=/data/csfd-ratings.db
+      - WIKIDATA_REFRESH_DAYS=7
+      - RATING_TTL_HOURS=24
+      - MISS_TTL_DAYS=7
+      - CSFD_CONCURRENCY=2
+      - CSFD_DELAY_MS=500
+      # Token pro ruční spuštění obnovy Wikidat (POST /admin/refresh-wikidata). Prázdný = vypnuto.
+      - ADMIN_TOKEN=

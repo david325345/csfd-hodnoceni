@@ -1,0 +1,18 @@
+{
+  "name": "csfd-ratings",
+  "version": "1.0.0",
+  "description": "IMDb ID -> ČSFD hodnocení (Wikidata mapování + fallback hledání)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  },
+  "dependencies": {
+    "node-csfd-api": "5.13.1"
+  },
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  }
+}
