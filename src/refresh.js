@@ -88,8 +88,9 @@ export function createRefresher({ db, config, fetchImpl, log = console.log, now 
     const lastFull = Number(db.kvGet('wd_last_full') || 0);
     const lastSync = Number(db.kvGet('wd_last_sync') || 0);
     const lastAttempt = Number(db.kvGet('wd_last_attempt') || 0);
-    // Po neúspěchu zkusit znovu nejdřív za 6 hodin.
-    if (lastAttempt > lastSync && t - lastAttempt < FAIL_BACKOFF) return null;
+    const lastError = db.kvGet('wd_last_error');
+    // Po neúspěchu zkusit znovu nejdřív za 6 hodin (jen když poslední pokus opravdu selhal).
+    if (lastError && t - lastAttempt < FAIL_BACKOFF) return null;
     if (!lastFull || t - lastFull > config.wikidataFullDays * DAY) return refresh({ mode: 'full' });
     if (t - lastSync > config.wikidataIncrementalDays * DAY) return refresh({ mode: 'incremental' });
     return null;

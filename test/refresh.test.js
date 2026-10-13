@@ -130,7 +130,12 @@ test('migrace: stará tabulka bez Q-ID vynutí plné stažení', async () => {
   const path = join(mkdtempSync(join(tmpdir(), 'csfd-')), 'old.db');
   const old = new DatabaseSync(path);
   old.exec('CREATE TABLE wd_map (imdb TEXT NOT NULL, csfd INTEGER NOT NULL, PRIMARY KEY (imdb, csfd))');
-  old.exec("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT); INSERT INTO kv VALUES ('wd_last_full', '123')");
+  // Stav, jak ho zanechala první verze: úspěšný pokus před chvílí, bez chyby.
+  old.exec(`CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT);
+    INSERT INTO kv VALUES ('wd_last_full', '123');
+    INSERT INTO kv VALUES ('wd_last_refresh', '${Date.now() - 60_000}');
+    INSERT INTO kv VALUES ('wd_last_attempt', '${Date.now() - 60_000}');
+    INSERT INTO kv VALUES ('wd_last_error', '')`);
   old.exec("INSERT INTO wd_map VALUES ('tt1', 1)");
   old.close();
 
@@ -140,6 +145,19 @@ test('migrace: stará tabulka bez Q-ID vynutí plné stažení', async () => {
   const ref = createRefresher({ db, config, fetchImpl: fakeWikidata(dataset(5)).fetchImpl, log: quiet });
   assert.equal((await ref.refreshIfDue()).mode, 'full');
   db.close();
+});
+
+test('po neúspěchu 6 hodin pauza, pak znovu', async () => {
+  const db = openDb(':memory:');
+  let clock = 100 * DAY;
+  const failing = async () => { throw new Error('boom'); };
+  const ref = createRefresher({ db, config, fetchImpl: failing, log: quiet, now: () => clock });
+  const r = await ref.refreshIfDue();
+  assert.equal(r.ok, false);
+  clock += 3600_000;
+  assert.equal(ref.refreshIfDue(), null, 'za hodinu ještě ne');
+  clock += 6 * 3600_000;
+  assert.ok(ref.refreshIfDue(), 'po 7 hodinách znovu');
 });
 
 test('limiter dodrží souběh a rozestup', async () => {
