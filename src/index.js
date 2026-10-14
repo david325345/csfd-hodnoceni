@@ -20,7 +20,8 @@ const resolver = createResolver({ db, csfdClient, getMeta, config, log });
 const refresher = createRefresher({ db, config, log });
 const icon = loadIcon(config.iconPath);
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-const server = createServer({ db, resolver, refresher, csfdClient, config, icon, version });
+const installPage = readFileSync(new URL('./web/index.html', import.meta.url), 'utf8');
+const server = createServer({ db, resolver, refresher, csfdClient, config, icon, installPage, version });
 
 server.listen(config.port, () => {
   log(`[http] csfd-ratings ${version} poslouchá na portu ${config.port}, Wikidata párů: ${db.wdCount()}`);

@@ -1,4 +1,5 @@
 import http from 'node:http';
+import QRCode from 'qrcode';
 import { buildManifest, parseRatingsPath, publicBaseUrl, ratingsPayload } from './addon.js';
 
 const IMDB_RE = /^\/rating\/(tt\d{5,10})\/?$/;
@@ -19,9 +20,11 @@ export function createServer({
   csfdClient,
   config,
   icon = null,
+  installPage = null,
   version = '1.0.0',
   startedAt = Date.now()
 }) {
+  const qrCache = new Map();
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
@@ -62,6 +65,28 @@ export function createServer({
           },
           { 'Cache-Control': 'public, max-age=3600' }
         );
+      }
+
+      // --- Instalační stránka ---
+      if (req.method === 'GET' && (path === '/' || path === '/index.html') && installPage) {
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=300'
+        });
+        return res.end(installPage);
+      }
+
+      if (req.method === 'GET' && path === '/qr.svg') {
+        const target = `${publicBaseUrl(req, config.publicUrl)}/manifest.json`;
+        if (!qrCache.has(target)) {
+          if (qrCache.size > 20) qrCache.clear();
+          qrCache.set(target, await QRCode.toString(target, { type: 'svg', margin: 0, errorCorrectionLevel: 'M' }));
+        }
+        res.writeHead(200, {
+          'Content-Type': 'image/svg+xml',
+          'Cache-Control': 'public, max-age=86400'
+        });
+        return res.end(qrCache.get(target));
       }
 
       // --- Stremio addon rozhraní (NuvioTVOS externí hodnocení) ---

@@ -108,3 +108,30 @@ test('HTTP: bez ikony /icon.png neexistuje a manifest ji neuvádí', async () =>
     assert.equal(man.ratingSources[0].icon, undefined);
   });
 });
+
+test('HTTP: instalační stránka a QR kód s adresou manifestu', async () => {
+  const db = openDb(':memory:');
+  const server = createServer({
+    db,
+    resolver,
+    refresher: { running: false, refresh() {} },
+    csfdClient: { pending: 0 },
+    config: { publicUrl: 'https://csfd.example.cz', adminToken: '' },
+    installPage: '<!doctype html><title>ČSFD</title>',
+    version: '1.2.0'
+  });
+  await new Promise((r) => server.listen(0, r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const page = await fetch(`${base}/`);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-type'), /text\/html/);
+    const qr = await fetch(`${base}/qr.svg`);
+    assert.equal(qr.status, 200);
+    assert.equal(qr.headers.get('content-type'), 'image/svg+xml');
+    assert.match(await qr.text(), /^<svg/);
+  } finally {
+    await new Promise((r) => server.close(r));
+    db.close();
+  }
+});
