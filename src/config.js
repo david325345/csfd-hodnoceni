@@ -31,6 +31,10 @@ export const config = {
   csfdConcurrency: num('CSFD_CONCURRENCY', 2),
   csfdDelayMs: num('CSFD_DELAY_MS', 500),
 
+  // Stremio addon: veřejná adresa služby (jinak se odvodí z hlaviček) a cesta k ikoně
+  publicUrl: process.env.PUBLIC_URL || '',
+  iconPath: process.env.ICON_PATH || new URL('../public/icon.png', import.meta.url).pathname,
+
   // Volitelný token pro POST /admin/refresh-wikidata (prázdný = endpoint vypnutý)
   adminToken: process.env.ADMIN_TOKEN || ''
 };

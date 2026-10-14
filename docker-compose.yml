@@ -17,5 +17,7 @@ services:
       - MISS_TTL_DAYS=7
       - CSFD_CONCURRENCY=2
       - CSFD_DELAY_MS=500
+      # Veřejná adresa služby (pro odkaz na ikonu v manifestu). Prázdné = z hlaviček proxy.
+      - PUBLIC_URL=
       # Token pro ruční spuštění obnovy Wikidat (POST /admin/refresh-wikidata). Prázdný = vypnuto.
       - ADMIN_TOKEN=

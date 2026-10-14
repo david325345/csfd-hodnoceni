@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { buildManifest, parseRatingsPath, publicBaseUrl, ratingsPayload } from './addon.js';
 
 const IMDB_RE = /^\/rating\/(tt\d{5,10})\/?$/;
 
@@ -11,7 +12,16 @@ const send = (res, status, body, extraHeaders = {}) => {
   res.end(JSON.stringify(body));
 };
 
-export function createServer({ db, resolver, refresher, csfdClient, config, startedAt = Date.now() }) {
+export function createServer({
+  db,
+  resolver,
+  refresher,
+  csfdClient,
+  config,
+  icon = null,
+  version = '1.0.0',
+  startedAt = Date.now()
+}) {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
@@ -52,6 +62,42 @@ export function createServer({ db, resolver, refresher, csfdClient, config, star
           },
           { 'Cache-Control': 'public, max-age=3600' }
         );
+      }
+
+      // --- Stremio addon rozhraní (NuvioTVOS externí hodnocení) ---
+      if (req.method === 'GET' && path === '/manifest.json') {
+        const manifest = buildManifest({
+          baseUrl: publicBaseUrl(req, config.publicUrl),
+          hasIcon: Boolean(icon),
+          version
+        });
+        return send(res, 200, manifest, { 'Cache-Control': 'public, max-age=3600' });
+      }
+
+      if (req.method === 'GET' && path.startsWith('/ratings/')) {
+        const parsed = parseRatingsPath(path);
+        if (!parsed) return send(res, 200, { ratings: [] }, { 'Cache-Control': 'public, max-age=86400' });
+        let result = null;
+        try {
+          result = await resolver.resolve(parsed.imdbId);
+        } catch (e) {
+          // ČSFD/Cinemeta nedostupné a nic v cache — Nuvio prostě nic nezobrazí.
+          console.error(`[ratings] ${parsed.imdbId}: ${e.message}`);
+          return send(res, 200, { ratings: [] }, { 'Cache-Control': 'no-store' });
+        }
+        const payload = ratingsPayload(result);
+        const maxAge = payload.ratings.length ? 21600 : 3600;
+        return send(res, 200, payload, { 'Cache-Control': `public, max-age=${maxAge}` });
+      }
+
+      if (req.method === 'GET' && path === '/icon.png' && icon) {
+        res.writeHead(200, {
+          'Content-Type': 'image/png',
+          'Content-Length': icon.length,
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=604800'
+        });
+        return res.end(icon);
       }
 
       if (req.method === 'GET' && path === '/health') {
