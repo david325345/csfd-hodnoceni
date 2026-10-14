@@ -14,7 +14,10 @@ Malá služba, která k IMDb ID vrátí hodnocení z ČSFD. Určená jako zdroj 
    - shoda se uzná jen při stejném typu (film / seriál), roku ±1 **a** shodě aspoň jednoho režiséra nebo herce. Bez shody tvůrce stačí shoda názvu jen při přesném roce. Dva stejně dobří kandidáti = nenalezeno (nehádá se).
    - Nalezený pár se uloží natrvalo (`own_map`), neúspěch na 7 dní (`miss`).
    - Stojí to 2 requesty na ČSFD (hledání + detail) a pro každý titul se to stane jednou.
-3. **Hodnocení** z detailu na ČSFD se ukládá do databáze. Platnost podle roku vydání: tituly starší víc než rok (letos 2024 a starší) 90 dní, novější a tituly bez roku 7 dní. Když je ČSFD nedostupné, vrátí se starší uložené hodnocení s `"stale": true`.
+3. **Hodnocení** z detailu na ČSFD se ukládá do databáze. Platnost:
+   - **filmy** podle roku vydání: 2 a víc let staré 365 dní, loňské 90 dní, letošní, budoucí a bez roku 3 dny,
+   - **seriály** podle stavu z Cinemety (`status` + `releaseInfo`): ukončené 365 dní, běžící a nezjištěné 3 dny. U ukončených se každých 30 dní (při dotazu) ověří v Cinemetě, že jsou pořád ukončené se stejným rokem konce. Když se seriál rozjel nebo přibyla sezóna, hodnocení se hned stáhne znovu a seriál se dál bere jako běžící. Kontrola stavu na ČSFD nic neposílá.
+   - Když je ČSFD nedostupné, vrátí se starší uložené hodnocení s `"stale": true`.
 
 Na ČSFD se jde jen na vyžádání, přes frontu (max. 2 požadavky souběžně, 500 ms rozestup). Cookie anti-bot ochrany Anubis (platí ~týden, vázané na IP serveru) se ukládá do databáze, aby se po restartu nemuselo řešit znovu.
 
@@ -92,9 +95,12 @@ curl -X POST -H "Authorization: Bearer TOKEN" "http://localhost:7020/admin/refre
 | `WIKIDATA_INCREMENTAL_DAYS` | `7` | jak často stahovat přírůstek |
 | `WIKIDATA_FULL_REFRESH_DAYS` | `30` | jak často stahovat celé mapování |
 | `WIKIDATA_MAX_DROP_PERCENT` | `5` | max. povolený pokles počtu párů při plném stažení |
-| `RATING_TTL_OLD_DAYS` | `90` | platnost hodnocení starších titulů |
-| `RATING_TTL_NEW_DAYS` | `7` | platnost hodnocení nových titulů a titulů bez roku |
-| `RATING_OLD_AFTER_YEARS` | `1` | o kolik let starší než aktuální rok musí titul být, aby byl „starý“ |
+| `RATING_TTL_FILM_OLD_DAYS` | `365` | filmy 2 a víc let staré |
+| `RATING_TTL_FILM_LAST_YEAR_DAYS` | `90` | loňské filmy |
+| `RATING_TTL_FILM_NEW_DAYS` | `3` | letošní, budoucí a filmy bez roku |
+| `RATING_TTL_SERIES_ENDED_DAYS` | `365` | ukončené seriály |
+| `RATING_TTL_SERIES_ONGOING_DAYS` | `3` | běžící seriály a seriály s nezjištěným stavem |
+| `SERIES_STATUS_CHECK_DAYS` | `30` | jak často ověřit, že ukončený seriál je pořád ukončený |
 | `MISS_TTL_DAYS` | `7` | jak dlouho se znovu nehledá nenalezený titul |
 | `CSFD_CONCURRENCY` | `2` | souběžné požadavky na ČSFD |
 | `CSFD_DELAY_MS` | `500` | min. rozestup požadavků na ČSFD |

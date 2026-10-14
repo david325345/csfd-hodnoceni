@@ -54,6 +54,12 @@ export function openDb(path) {
   }
   db.exec('CREATE INDEX IF NOT EXISTS wd_map_item ON wd_map (item)');
 
+  // Migrace: stav seriálu u hodnocení (verze 1.3).
+  const rcols = db.prepare('PRAGMA table_info(rating)').all().map((c) => c.name);
+  if (!rcols.includes('series_status')) db.exec('ALTER TABLE rating ADD COLUMN series_status TEXT');
+  if (!rcols.includes('series_end_year')) db.exec('ALTER TABLE rating ADD COLUMN series_end_year INTEGER');
+  if (!rcols.includes('status_checked_at')) db.exec('ALTER TABLE rating ADD COLUMN status_checked_at INTEGER');
+
   const prepareWd = () => ({
     wdGet: db.prepare('SELECT csfd FROM wd_map WHERE imdb = ? ORDER BY csfd'),
     wdCount: db.prepare('SELECT COUNT(*) AS n FROM wd_map'),
@@ -77,9 +83,12 @@ export function openDb(path) {
     missCount: db.prepare('SELECT COUNT(*) AS n FROM miss'),
     ratingGet: db.prepare('SELECT * FROM rating WHERE csfd = ?'),
     ratingPut: db.prepare(
-      `INSERT OR REPLACE INTO rating (csfd, rating, rating_count, color, title, year, type, fetched_at)
-       VALUES (@csfd, @rating, @rating_count, @color, @title, @year, @type, @fetched_at)`
+      `INSERT OR REPLACE INTO rating
+         (csfd, rating, rating_count, color, title, year, type, fetched_at, series_status, series_end_year, status_checked_at)
+       VALUES (@csfd, @rating, @rating_count, @color, @title, @year, @type, @fetched_at,
+               @series_status, @series_end_year, @status_checked_at)`
     ),
+    ratingStatusChecked: db.prepare('UPDATE rating SET status_checked_at = ? WHERE csfd = ?'),
     ratingCount: db.prepare('SELECT COUNT(*) AS n FROM rating'),
     kvGet: db.prepare('SELECT value FROM kv WHERE key = ?'),
     kvPut: db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)'),
@@ -146,7 +155,9 @@ export function openDb(path) {
     missCount: () => st.missCount.get().n,
 
     ratingGet: (csfd) => st.ratingGet.get(csfd),
-    ratingPut: (row) => st.ratingPut.run(row),
+    ratingPut: (row) =>
+      st.ratingPut.run({ series_status: null, series_end_year: null, status_checked_at: null, ...row }),
+    ratingStatusChecked: (csfd, ts) => st.ratingStatusChecked.run(ts, csfd),
     ratingCount: () => st.ratingCount.get().n,
 
     kvGet: (key) => st.kvGet.get(key)?.value ?? null,

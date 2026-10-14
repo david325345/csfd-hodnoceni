@@ -1,6 +1,6 @@
 {
   "name": "csfd-ratings",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "IMDb ID -> ČSFD hodnocení (Wikidata mapování + fallback hledání)",
   "main": "src/index.js",
   "scripts": {

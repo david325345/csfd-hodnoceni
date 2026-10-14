@@ -20,11 +20,16 @@ export const config = {
   wikidataUserAgent:
     process.env.WIKIDATA_USER_AGENT || 'csfd-ratings/1.0 (self-hosted rating service)',
 
-  // Platnost uloženého hodnocení podle stáří titulu.
-  // „Starý“ = rok vydání je o víc než RATING_OLD_AFTER_YEARS let před aktuálním rokem.
-  ratingTtlOldDays: num('RATING_TTL_OLD_DAYS', 90),
-  ratingTtlNewDays: num('RATING_TTL_NEW_DAYS', 7),
-  ratingOldAfterYears: num('RATING_OLD_AFTER_YEARS', 1),
+  // Platnost uloženého hodnocení.
+  // Filmy podle roku vydání (vůči aktuálnímu roku): 2+ roky / loňský / letošní, budoucí a bez roku.
+  ttlFilmOldDays: num('RATING_TTL_FILM_OLD_DAYS', 365),
+  ttlFilmLastYearDays: num('RATING_TTL_FILM_LAST_YEAR_DAYS', 90),
+  ttlFilmNewDays: num('RATING_TTL_FILM_NEW_DAYS', 3),
+  // Seriály podle stavu z Cinemety: ukončené / běžící a nezjištěné.
+  ttlSeriesEndedDays: num('RATING_TTL_SERIES_ENDED_DAYS', 365),
+  ttlSeriesOngoingDays: num('RATING_TTL_SERIES_ONGOING_DAYS', 3),
+  // Jak často u ukončeného seriálu ověřit v Cinemetě, že je pořád ukončený.
+  seriesStatusCheckDays: num('SERIES_STATUS_CHECK_DAYS', 30),
   missTtlDays: num('MISS_TTL_DAYS', 7),
 
   // Šetrnost k ČSFD

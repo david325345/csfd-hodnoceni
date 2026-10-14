@@ -6,17 +6,35 @@ const HOUR = 3600_000;
 const DAY = 24 * HOUR;
 const NON_TITLE_TYPES = new Set(['season', 'episode']);
 
+const SERIES_TYPES = new Set(['series', 'tv-show']);
+
+export const isSeriesType = (type) => SERIES_TYPES.has(type);
+
 /**
- * Platnost uloženého hodnocení: u starších titulů se hodnocení skoro nemění,
- * u nových se ještě hýbe. Neznámý rok = jako nový.
+ * Platnost uloženého hodnocení.
+ * Filmy podle roku vydání: 2+ roky staré dlouho, loňské středně, letošní/bez roku krátce.
+ * Seriály podle stavu z Cinemety: ukončené dlouho, běžící a nezjištěné krátce.
  */
-export function ratingTtlMs(year, nowMs, config) {
+export function ratingTtlMs(row, nowMs, config) {
+  if (isSeriesType(row.type)) {
+    const days = row.series_status === 'ended' ? config.ttlSeriesEndedDays : config.ttlSeriesOngoingDays;
+    return days * DAY;
+  }
   const currentYear = new Date(nowMs).getUTCFullYear();
-  const old = Number.isFinite(year) && year > 0 && currentYear - year > config.ratingOldAfterYears;
-  return (old ? config.ratingTtlOldDays : config.ratingTtlNewDays) * DAY;
+  const age = Number.isFinite(row.year) && row.year > 0 ? currentYear - row.year : -1;
+  const days = age >= 2 ? config.ttlFilmOldDays : age === 1 ? config.ttlFilmLastYearDays : config.ttlFilmNewDays;
+  return days * DAY;
 }
 
-export function createResolver({ db, csfdClient, getMeta, config, now = () => Date.now(), log = console.log }) {
+export function createResolver({
+  db,
+  csfdClient,
+  getMeta,
+  getSeriesStatus = async () => null,
+  config,
+  now = () => Date.now(),
+  log = console.log
+}) {
   const inflight = new Map();
   const stats = {
     requests: 0,
@@ -27,13 +45,49 @@ export function createResolver({ db, csfdClient, getMeta, config, now = () => Da
     ratingFetches: 0,
     ratingCacheHits: 0,
     staleServed: 0,
+    seriesStatusChecks: 0,
+    seriesRevived: 0,
     errors: 0
   };
 
+  /** Stav seriálu z Cinemety; chyba = nezjištěno. */
+  async function seriesStatus(imdbId) {
+    try {
+      return (await getSeriesStatus(imdbId)) ?? { status: null, endYear: null };
+    } catch (e) {
+      log(`[cinemeta] ${imdbId}: ${e.message}`);
+      return { status: null, endYear: null };
+    }
+  }
+
+  /**
+   * U ukončeného seriálu s platným hodnocením jednou za čas ověří stav v Cinemetě.
+   * Pořád ukončený se stejným rokem konce → jen se zapíše čas kontroly.
+   * Jinak (rozjel se znovu, přibyla sezóna) → false a hodnocení se stáhne znovu.
+   */
+  async function endedStillValid(cached, imdbId) {
+    const checkedAt = cached.status_checked_at || cached.fetched_at;
+    if (now() - checkedAt < config.seriesStatusCheckDays * DAY) return true;
+    stats.seriesStatusChecks++;
+    const s = await seriesStatus(imdbId);
+    if (s.status === null) return true; // Cinemeta nedostupná, zkusí se příště
+    if (s.status === 'ended' && s.endYear === cached.series_end_year) {
+      db.ratingStatusChecked(cached.csfd, now());
+      return true;
+    }
+    stats.seriesRevived++;
+    log(`[series] ${imdbId}: ${cached.series_status}/${cached.series_end_year} → ${s.status}/${s.endYear}, stahuji znovu`);
+    return false;
+  }
+
   /** Hodnocení podle ČSFD ID, z cache nebo čerstvě. Vrací řádek tabulky rating. */
-  async function getRating(csfdId) {
+  async function getRating(csfdId, imdbId) {
     const cached = db.ratingGet(csfdId);
-    if (cached && now() - cached.fetched_at < ratingTtlMs(cached.year, now(), config)) {
+    let fresh = Boolean(cached) && now() - cached.fetched_at < ratingTtlMs(cached, now(), config);
+    if (fresh && isSeriesType(cached.type) && cached.series_status === 'ended' && imdbId) {
+      fresh = await endedStillValid(cached, imdbId);
+    }
+    if (fresh) {
       stats.ratingCacheHits++;
       return { row: cached, stale: false };
     }
@@ -48,8 +102,17 @@ export function createResolver({ db, csfdClient, getMeta, config, now = () => Da
         title: m.title ?? null,
         year: Number.isFinite(Number(m.year)) ? Number(m.year) : null,
         type: m.type ?? null,
-        fetched_at: now()
+        fetched_at: now(),
+        series_status: null,
+        series_end_year: null,
+        status_checked_at: null
       };
+      if (isSeriesType(row.type) && imdbId) {
+        const s = await seriesStatus(imdbId);
+        row.series_status = s.status;
+        row.series_end_year = s.endYear;
+        row.status_checked_at = now();
+      }
       db.ratingPut(row);
       return { row, stale: false };
     } catch (e) {
@@ -64,11 +127,11 @@ export function createResolver({ db, csfdClient, getMeta, config, now = () => Da
   }
 
   /** Z několika ČSFD ID pro jedno IMDb vybere první, které není sezóna/díl. */
-  async function ratingFromCandidates(ids) {
+  async function ratingFromCandidates(ids, imdbId) {
     let lastErr = null;
     for (const id of ids) {
       try {
-        const r = await getRating(id);
+        const r = await getRating(id, imdbId);
         if (ids.length > 1 && NON_TITLE_TYPES.has(r.row.type)) continue;
         return { csfdId: id, ...r };
       } catch (e) {
@@ -114,12 +177,12 @@ export function createResolver({ db, csfdClient, getMeta, config, now = () => Da
     // 1) vlastní nalezené páry, 2) Wikidata
     const own = db.ownGet(imdbId);
     if (own) {
-      const r = await ratingFromCandidates([own.csfd]);
+      const r = await ratingFromCandidates([own.csfd], imdbId);
       if (r) return { ...r, source: 'own' };
     }
     const wd = db.wdCsfdIds(imdbId);
     if (wd.length) {
-      const r = await ratingFromCandidates(wd);
+      const r = await ratingFromCandidates(wd, imdbId);
       if (r) return { ...r, source: 'wikidata' };
     }
 
@@ -142,7 +205,7 @@ export function createResolver({ db, csfdClient, getMeta, config, now = () => Da
       db.missPut(imdbId, fb.reason, now());
       return null;
     }
-    const r = await ratingFromCandidates([fb.match]);
+    const r = await ratingFromCandidates([fb.match], imdbId);
     return r ? { ...r, source: 'search' } : null;
   }
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getMeta, isValidMeta } from '../src/cinemeta.js';
+import { getMeta, isValidMeta, parseSeriesStatus, getSeriesStatus } from '../src/cinemeta.js';
 
 // Podvržená Cinemeta: odpovědi podle typu endpointu.
 const fakeCinemeta = (byType) => async (url) => {
@@ -44,4 +44,24 @@ test('film projde hned z filmového endpointu', async () => {
   });
   assert.equal(meta.type, 'movie');
   assert.deepEqual(meta.directors, ['Quentin Tarantino']);
+});
+
+test('parseSeriesStatus podle skutečných odpovědí Cinemety', () => {
+  assert.deepEqual(parseSeriesStatus({ releaseInfo: '2008–2013', status: 'Ended' }), { status: 'ended', endYear: 2013 });
+  assert.deepEqual(parseSeriesStatus({ releaseInfo: '2016–2025', status: 'Ended' }), { status: 'ended', endYear: 2025 });
+  assert.deepEqual(parseSeriesStatus({ releaseInfo: '2022–', status: 'Continuing' }), { status: 'continuing', endYear: null });
+  assert.deepEqual(parseSeriesStatus({ releaseInfo: '1999–', status: 'Returning Series' }), { status: 'continuing', endYear: null });
+  assert.deepEqual(parseSeriesStatus({ releaseInfo: '2005–2013' }), { status: 'ended', endYear: 2013 }, 'bez status pole z rozsahu');
+  assert.deepEqual(parseSeriesStatus({ releaseInfo: '2022–' }), { status: 'continuing', endYear: null });
+  assert.deepEqual(parseSeriesStatus({}), { status: null, endYear: null });
+});
+
+test('getSeriesStatus: platná odpověď, jiné ID, 404', async () => {
+  const ok = await getSeriesStatus('tt0903747', {
+    fetchImpl: fakeCinemeta({ series: { id: 'tt0903747', type: 'series', name: 'Breaking Bad', releaseInfo: '2008–2013', status: 'Ended' } })
+  });
+  assert.deepEqual(ok, { status: 'ended', endYear: 2013 });
+  const wrong = await getSeriesStatus('tt0903747', { fetchImpl: fakeCinemeta({ series: { id: 'tt1', type: 'series', name: 'X' } }) });
+  assert.equal(wrong, null);
+  assert.equal(await getSeriesStatus('tt0903747', { fetchImpl: fakeCinemeta({ series: 404 }) }), null);
 });

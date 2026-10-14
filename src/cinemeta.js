@@ -48,3 +48,29 @@ export async function getMeta(imdbId, { fetchImpl = fetch, timeoutMs = 10_000 } 
   }
   return null;
 }
+
+/**
+ * Stav seriálu z Cinemety: { status: 'ended'|'continuing'|null, endYear: number|null }.
+ * `status` bere z pole status (Ended / Continuing / Returning Series), jinak z releaseInfo
+ * ("2008–2013" = ukončený, "2022–" = běžící). Vrací null, když Cinemeta seriál nezná.
+ */
+export function parseSeriesStatus(meta) {
+  const info = String(meta?.releaseInfo ?? meta?.year ?? '');
+  const range = info.match(/(\d{4})\s*[–-]\s*(\d{4})?/);
+  const endYear = range && range[2] ? Number(range[2]) : null;
+  const raw = String(meta?.status ?? '').toLowerCase();
+  let status = null;
+  if (raw === 'ended' || raw === 'canceled' || raw === 'cancelled') status = 'ended';
+  else if (raw) status = 'continuing';
+  else if (range) status = endYear ? 'ended' : 'continuing';
+  return { status, endYear };
+}
+
+export async function getSeriesStatus(imdbId, { fetchImpl = fetch, timeoutMs = 8_000 } = {}) {
+  const res = await fetchImpl(`${BASE}/series/${imdbId}.json`, { signal: AbortSignal.timeout(timeoutMs) });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Cinemeta HTTP ${res.status}`);
+  const meta = (await res.json())?.meta;
+  if (!isValidMeta(meta, imdbId, 'series')) return null;
+  return parseSeriesStatus(meta);
+}
