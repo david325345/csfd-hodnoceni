@@ -17,8 +17,6 @@
     --text: #eaf1ef;
     --muted: #94aeab;
     --good: #e5383f;
-    --average: #5b8def;
-    --bad: #c3cbcf;
     --focus: #f2c14e;
     color-scheme: dark;
   }
@@ -39,9 +37,7 @@
   /* Úvod: vlevo popis, vpravo živé hodnocení ve stejné podobě jako v Nuviu */
   .hero {
     display: grid;
-    grid-template-columns: minmax(0, 1.25fr) auto;
-    gap: 48px;
-    align-items: end;
+    grid-template-columns: minmax(0, 1fr);
     padding: 72px 0 56px;
     border-bottom: 1px solid var(--line);
   }
@@ -57,23 +53,6 @@
   }
   .lead { margin: 0; max-width: 34ch; color: var(--muted); font-size: 19px; }
 
-  .reading { justify-self: end; text-align: right; min-height: 190px; }
-  .reading .row { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
-  .reading img { width: 76px; height: 76px; }
-  .reading .pct {
-    font-stretch: 62%;
-    font-weight: 800;
-    font-size: clamp(96px, 16vw, 168px);
-    line-height: .85;
-    letter-spacing: -0.02em;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-  .reading .what { margin-top: 14px; color: var(--muted); }
-  .reading .what a { color: var(--muted); }
-  .good { color: var(--good); }
-  .average { color: var(--average); }
-  .bad, .unknown { color: var(--bad); }
 
   section { padding: 48px 0; border-bottom: 1px solid var(--line); }
   h2 { font-stretch: 85%; font-weight: 700; font-size: 26px; margin: 0 0 24px; }
@@ -110,32 +89,17 @@
   .qr .code svg, .qr .code img { width: 100%; height: auto; display: block; }
   .qr p { color: var(--muted); font-size: 14px; margin: 10px 0 0; text-align: left; }
 
-  /* Vyzkoušet */
-  .try .field { max-width: 560px; }
-  .result { margin-top: 22px; min-height: 64px; display: flex; align-items: center; gap: 18px; }
-  .result .pct { font-stretch: 62%; font-weight: 800; font-size: 56px; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .result .meta { color: var(--muted); }
-  .result .meta strong { color: var(--text); font-weight: 600; }
-  .result .msg { color: var(--muted); }
 
   footer { padding: 32px 0 48px; color: var(--muted); font-size: 14px; }
   footer p { margin: 0 0 6px; max-width: 72ch; }
 
   @media (max-width: 760px) {
-    .hero { grid-template-columns: 1fr; gap: 28px; padding: 44px 0 40px; }
-    .reading { justify-self: start; text-align: left; min-height: 0; }
-    .reading .row { justify-content: flex-start; }
-    .reading img { width: 52px; height: 52px; }
+    .hero { padding: 44px 0 40px; }
     .install { grid-template-columns: minmax(0, 1fr); }
     .qr { width: 180px; }
     ol.steps > li { padding-left: 40px; }
     .field { flex-wrap: wrap; }
     .field input { flex: 1 1 100%; }
-    .result { flex-wrap: wrap; gap: 8px 18px; }
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    .reading.ready .pct { animation: count-in .5s ease-out both; }
-    @keyframes count-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
   }
 </style>
 </head>
@@ -146,10 +110,6 @@
       <div class="brand"><img src="/icon.png" alt="" data-icon hidden><span>Addon pro Nuvio na Apple TV</span></div>
       <h1>Hodnocení z&nbsp;ČSFD přímo v&nbsp;Nuviu</h1>
       <p class="lead">U každého filmu a seriálu uvidíš v detailu procenta z&nbsp;ČSFD hned vedle IMDb a&nbsp;dalších hodnocení. Klepnutím otevřeš stránku na ČSFD.</p>
-    </div>
-    <div class="reading" id="reading" aria-live="polite">
-      <div class="row"><img src="/icon.png" alt="" data-icon hidden><span class="pct" id="hero-pct">…</span></div>
-      <div class="what" id="hero-what">Načítám hodnocení</div>
     </div>
   </div>
 </header>
@@ -169,7 +129,7 @@
         <li>V Nuviu otevři nastavení addonů a přidej addon s touto adresou.</li>
         <li>
           Otevři detail libovolného filmu nebo seriálu. Hodnocení ČSFD se ukáže v řádku s hodnocením.
-          <p class="note">Hodnocení z addonů umí Nuvio pro tvOS ve verzi novější než 3.4.3. Zdroj ČSFD jde v nastavení hodnocení vypnout.</p>
+          <p class="note">Hodnocení z addonů umí Nuvio pro tvOS od verze 3.4.4. Zdroj ČSFD jde vypnout v nastavení Integrations → MDBList Ratings &amp; Badges → Add-on Rating Providers.</p>
         </li>
       </ol>
       <div class="qr">
@@ -179,17 +139,6 @@
     </div>
   </section>
 
-  <section class="try" aria-labelledby="try-h">
-    <h2 id="try-h">Vyzkoušet</h2>
-    <form id="try-form">
-      <label for="q">IMDb ID nebo odkaz z IMDb</label>
-      <div class="field">
-        <input id="q" type="text" inputmode="url" autocomplete="off" placeholder="tt0110912 nebo https://www.imdb.com/title/tt0110912/">
-        <button type="submit" id="try-btn">Zjistit hodnocení</button>
-      </div>
-    </form>
-    <div class="result" id="result" aria-live="polite"></div>
-  </section>
 </main>
 
 <footer class="wrap">
@@ -218,60 +167,6 @@
     }
     btn.textContent = 'Zkopírováno';
     setTimeout(() => (btn.textContent = 'Kopírovat'), 2000);
-  });
-
-  const typeLabel = { film: 'film', 'tv-film': 'TV film', series: 'seriál', 'tv-show': 'pořad' };
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-
-  async function lookup(imdb) {
-    const r = await fetch('/rating/' + imdb);
-    if (r.status === 404) return null;
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return r.json();
-  }
-
-  // Úvod: skutečné hodnocení jednoho filmu
-  (async () => {
-    try {
-      const j = await lookup('tt0110912');
-      if (!j || j.rating == null) throw new Error('no rating');
-      $('hero-pct').textContent = j.rating + '\u00a0%';
-      $('hero-pct').className = 'pct ' + (j.colorRating || 'good');
-      $('hero-what').innerHTML = `<a href="${esc(j.url)}" target="_blank" rel="noopener">${esc(j.title)}</a> (${esc(j.year)}), právě teď na ČSFD`;
-      $('reading').classList.add('ready');
-    } catch {
-      $('reading').hidden = true;
-    }
-  })();
-
-  $('try-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const out = $('result');
-    const m = $('q').value.match(/tt\d{5,10}/);
-    if (!m) {
-      out.innerHTML = '<span class="msg">Zadej IMDb ID ve tvaru tt0110912 nebo vlož odkaz na titul z IMDb.</span>';
-      return;
-    }
-    const btn = $('try-btn');
-    btn.disabled = true;
-    out.innerHTML = '<span class="msg">Hledám na ČSFD…</span>';
-    try {
-      const j = await lookup(m[0]);
-      if (!j) {
-        out.innerHTML = `<span class="msg">Titul ${esc(m[0])} se na ČSFD nepodařilo najít.</span>`;
-      } else {
-        const pct = j.rating == null ? '—' : j.rating + '\u00a0%';
-        const count = j.ratingCount ? `, ${Number(j.ratingCount).toLocaleString('cs-CZ')} hodnocení` : '';
-        const note = j.rating == null ? '<br>Titul zatím nemá dost hodnocení.' : '';
-        out.innerHTML = `<span class="pct ${esc(j.colorRating || 'unknown')}">${pct}</span>
-          <span class="meta"><strong>${esc(j.title)}</strong> (${esc(j.year)}), ${esc(typeLabel[j.type] || j.type)}${count}<br>
-          <a href="${esc(j.url)}" target="_blank" rel="noopener">Otevřít na ČSFD</a>${note}</span>`;
-      }
-    } catch {
-      out.innerHTML = '<span class="msg">ČSFD teď neodpovídá. Zkus to za chvíli znovu.</span>';
-    } finally {
-      btn.disabled = false;
-    }
   });
 
   (async () => {
