@@ -1,5 +1,5 @@
 // Jádro: IMDb ID → ČSFD ID → hodnocení.
-import { pickMatch } from './matcher.js';
+import { pickMatch, altTitleCandidates, titleMatchesAny } from './matcher.js';
 import { isNotFound } from './csfd.js';
 
 const HOUR = 3600_000;
@@ -30,18 +30,22 @@ export function createResolver({
   db,
   csfdClient,
   getMeta,
+  getMetas = async (id) => [await getMeta(id)].filter(Boolean),
   getSeriesStatus = async () => null,
   config,
   now = () => Date.now(),
   log = console.log
 }) {
   const inflight = new Map();
+  // Detaily stažené při hledání shody přes alternativní názvy — použijí se místo dalšího requestu.
+  const prefetched = new Map();
+  const PREFETCH_MS = 60_000;
   const stats = {
     requests: 0,
     bySource: { own: 0, wikidata: 0, search: 0 },
     notFound: 0,
     missCacheHits: 0,
-    fallback: { attempts: 0, matched: 0, noMeta: 0, noMatch: 0, ambiguous: 0, errors: 0 },
+    fallback: { attempts: 0, matched: 0, altTitle: 0, noMeta: 0, noMatch: 0, ambiguous: 0, errors: 0 },
     ratingFetches: 0,
     ratingCacheHits: 0,
     staleServed: 0,
@@ -92,7 +96,9 @@ export function createResolver({
       return { row: cached, stale: false };
     }
     try {
-      const m = await csfdClient.movie(csfdId);
+      const pre = prefetched.get(csfdId);
+      prefetched.delete(csfdId);
+      const m = pre && now() - pre.at < PREFETCH_MS ? pre.detail : await csfdClient.movie(csfdId);
       stats.ratingFetches++;
       const row = {
         csfd: csfdId,
@@ -143,37 +149,86 @@ export function createResolver({
     return null;
   }
 
-  async function fallback(imdbId) {
-    stats.fallback.attempts++;
-    const meta = await getMeta(imdbId);
-    if (!meta) {
-      stats.fallback.noMeta++;
-      return { match: null, reason: 'no-meta' };
-    }
+  /**
+   * Najde ČSFD ID pro jeden záznam z Cinemety: hledání podle názvu, shoda přes tvůrce/název,
+   * a když nic, shoda přes alternativní názvy z detailu kandidátů (detail se předstáhne,
+   * takže následné stažení hodnocení nestojí další request).
+   */
+  async function matchOne(meta) {
     const search = await csfdClient.search(meta.name);
-    const result = pickMatch(meta, search);
-    if (!result.candidate) {
-      if (result.reason === 'ambiguous') stats.fallback.ambiguous++;
+    const r = pickMatch(meta, search);
+    if (r.candidate) return { match: r.candidate, reasons: r.reasons };
+    if (r.reason === 'ambiguous') return { match: null, reason: 'ambiguous' };
+
+    const hits = [];
+    for (const c of altTitleCandidates(meta, search)) {
+      let detail;
+      try {
+        detail = await csfdClient.movie(c.id);
+      } catch (e) {
+        if (isNotFound(e)) continue;
+        throw e;
+      }
+      prefetched.set(c.id, { detail, at: now() });
+      if (titleMatchesAny(meta.name, detail)) hits.push(c);
+    }
+    if (hits.length === 1) {
+      const c = hits[0];
+      return { match: c, reasons: ['alt-title', c.year === meta.year ? 'year' : 'year±1'] };
+    }
+    return { match: null, reason: hits.length > 1 ? 'ambiguous' : 'no-match' };
+  }
+
+  /**
+   * IMDb ID → ČSFD kandidát bez zápisu do DB.
+   * S typem (movie/series) se ptá jen příslušného endpointu Cinemety.
+   * Bez typu zkusí oba a výsledek přijme jen tehdy, když sedí právě jeden.
+   */
+  async function findMatch(imdbId, type) {
+    const metas = type ? [await getMeta(imdbId, { type })].filter(Boolean) : await getMetas(imdbId);
+    if (!metas.length) return { match: null, reason: 'no-meta' };
+    const found = [];
+    let reason = 'no-match';
+    for (const meta of metas) {
+      const r = await matchOne(meta);
+      if (r.match) found.push({ ...r, meta });
+      else if (r.reason === 'ambiguous') reason = 'ambiguous';
+    }
+    if (found.length === 1) return found[0];
+    if (found.length > 1) {
+      const ids = new Set(found.map((f) => f.match.id));
+      return ids.size === 1 ? found[0] : { match: null, reason: 'ambiguous-type' };
+    }
+    return { match: null, reason, meta: metas[0] };
+  }
+
+  async function fallback(imdbId, type) {
+    stats.fallback.attempts++;
+    const r = await findMatch(imdbId, type);
+    if (!r.match) {
+      if (r.reason === 'no-meta') stats.fallback.noMeta++;
+      else if (r.reason.startsWith('ambiguous')) stats.fallback.ambiguous++;
       else stats.fallback.noMatch++;
-      log(`[fallback] ${imdbId} "${meta.name}" (${meta.year}): ${result.reason}`);
-      return { match: null, reason: result.reason };
+      log(`[fallback] ${imdbId}${type ? ` (${type})` : ''} "${r.meta?.name ?? '?'}" (${r.meta?.year ?? '?'}): ${r.reason}`);
+      return { match: null, reason: r.reason };
     }
     stats.fallback.matched++;
-    const c = result.candidate;
+    if (r.reasons.includes('alt-title')) stats.fallback.altTitle++;
+    const c = r.match;
     db.ownPut({
       imdb: imdbId,
       csfd: c.id,
       title: c.title,
       year: Number.isFinite(c.year) ? c.year : null,
-      matched_by: result.reasons.join(','),
+      matched_by: r.reasons.join(','),
       created_at: now()
     });
     db.missDel(imdbId);
-    log(`[fallback] ${imdbId} "${meta.name}" → ČSFD ${c.id} "${c.title}" [${result.reasons.join(',')}]`);
+    log(`[fallback] ${imdbId}${type ? ` (${type})` : ''} "${r.meta.name}" → ČSFD ${c.id} "${c.title}" [${r.reasons.join(',')}]`);
     return { match: c.id };
   }
 
-  async function resolveUncached(imdbId) {
+  async function resolveUncached(imdbId, type) {
     // 1) vlastní nalezené páry, 2) Wikidata
     const own = db.ownGet(imdbId);
     if (own) {
@@ -196,7 +251,7 @@ export function createResolver({
     // 4) fallback: Cinemeta + hledání na ČSFD
     let fb;
     try {
-      fb = await fallback(imdbId);
+      fb = await fallback(imdbId, type);
     } catch (e) {
       stats.fallback.errors++;
       throw e;
@@ -209,12 +264,13 @@ export function createResolver({
     return r ? { ...r, source: 'search' } : null;
   }
 
-  async function resolve(imdbId) {
+  async function resolve(imdbId, { type } = {}) {
     stats.requests++;
-    if (inflight.has(imdbId)) return inflight.get(imdbId);
+    const key = `${imdbId}|${type ?? ''}`;
+    if (inflight.has(key)) return inflight.get(key);
     const p = (async () => {
       try {
-        const r = await resolveUncached(imdbId);
+        const r = await resolveUncached(imdbId, type);
         if (!r) {
           stats.notFound++;
           return null;
@@ -225,12 +281,13 @@ export function createResolver({
         stats.errors++;
         throw e;
       } finally {
-        inflight.delete(imdbId);
+        inflight.delete(key);
+        if (prefetched.size > 50) prefetched.clear();
       }
     })();
-    inflight.set(imdbId, p);
+    inflight.set(key, p);
     return p;
   }
 
-  return { resolve, stats };
+  return { resolve, findMatch, stats };
 }

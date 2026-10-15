@@ -135,3 +135,22 @@ test('HTTP: instalační stránka a QR kód s adresou manifestu', async () => {
     db.close();
   }
 });
+
+test('HTTP: typ z adresy /ratings/{type}/ se předá resolveru', async () => {
+  const seen = [];
+  const r = { async resolve(id, opts) { seen.push([id, opts?.type]); return null; } };
+  const db = openDb(':memory:');
+  const server = createServer({ db, resolver: r, refresher: { running: false }, csfdClient: { pending: 0 }, config: { publicUrl: '' } });
+  await new Promise((ok) => server.listen(0, ok));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    await fetch(`${base}/ratings/series/tt43691383.json`);
+    await fetch(`${base}/ratings/movie/tt0110912.json`);
+    await fetch(`${base}/rating/tt1234567?type=series`);
+    await fetch(`${base}/rating/tt1234568`);
+    assert.deepEqual(seen, [['tt43691383', 'series'], ['tt0110912', 'movie'], ['tt1234567', 'series'], ['tt1234568', undefined]]);
+  } finally {
+    await new Promise((ok) => server.close(ok));
+    db.close();
+  }
+});

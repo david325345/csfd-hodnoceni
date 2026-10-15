@@ -1,7 +1,7 @@
 import { config } from './config.js';
 import { openDb } from './db.js';
 import { createCsfdClient } from './csfd.js';
-import { getMeta, getSeriesStatus } from './cinemeta.js';
+import { getMeta, getMetas, getSeriesStatus } from './cinemeta.js';
 import { createResolver } from './resolver.js';
 import { createRefresher } from './refresh.js';
 import { createServer } from './server.js';
@@ -16,7 +16,7 @@ const csfdClient = createCsfdClient({
   concurrency: config.csfdConcurrency,
   delayMs: config.csfdDelayMs
 });
-const resolver = createResolver({ db, csfdClient, getMeta, getSeriesStatus, config, log });
+const resolver = createResolver({ db, csfdClient, getMeta, getMetas, getSeriesStatus, config, log });
 const refresher = createRefresher({ db, config, log });
 const icon = loadIcon(config.iconPath);
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));

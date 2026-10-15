@@ -77,6 +77,8 @@ export function openDb(path) {
        VALUES (@imdb, @csfd, @title, @year, @matched_by, @created_at)`
     ),
     ownCount: db.prepare('SELECT COUNT(*) AS n FROM own_map'),
+    ownAll: db.prepare('SELECT * FROM own_map ORDER BY created_at'),
+    ownDel: db.prepare('DELETE FROM own_map WHERE imdb = ?'),
     missGet: db.prepare('SELECT * FROM miss WHERE imdb = ?'),
     missPut: db.prepare('INSERT OR REPLACE INTO miss (imdb, reason, tried_at) VALUES (?, ?, ?)'),
     missDel: db.prepare('DELETE FROM miss WHERE imdb = ?'),
@@ -148,6 +150,8 @@ export function openDb(path) {
     ownGet: (imdb) => st.ownGet.get(imdb),
     ownPut: (row) => st.ownPut.run(row),
     ownCount: () => st.ownCount.get().n,
+    ownAll: () => st.ownAll.all(),
+    ownDel: (imdb) => st.ownDel.run(imdb),
 
     missGet: (imdb) => st.missGet.get(imdb),
     missPut: (imdb, reason, ts) => st.missPut.run(imdb, reason, ts),

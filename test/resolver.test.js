@@ -232,3 +232,90 @@ test('film se na Cinemetu neptá', async () => {
   await s.resolver.resolve('tt5x');
   assert.equal(s.calls.status || 0, 0);
 });
+
+// --- Fallback: typ z požadavku, oba endpointy, alternativní názvy ---
+function fbSetup({ metas = {}, search = { movies: [], tvSeries: [] }, details = {} }) {
+  const db = openDb(':memory:');
+  const calls = { movie: 0, search: 0, getMeta: [] };
+  const csfdClient = {
+    movie: async (id) => {
+      calls.movie++;
+      if (!details[id]) throw Object.assign(new Error('404'), { name: 'CsfdError', reason: 'not-found' });
+      return details[id];
+    },
+    search: async () => {
+      calls.search++;
+      return search;
+    },
+    pending: 0
+  };
+  const getMeta = async (id, { type } = {}) => {
+    calls.getMeta.push(type ?? 'any');
+    for (const t of type ? [type] : ['movie', 'series']) if (metas[t]) return metas[t];
+    return null;
+  };
+  const getMetas = async () => ['movie', 'series'].map((t) => metas[t]).filter(Boolean);
+  const resolver = createResolver({ db, csfdClient, getMeta, getMetas, config, now: () => NOW, log: quiet });
+  return { db, resolver, calls };
+}
+
+const cand = (o) => ({ creators: { directors: [], actors: [] }, ...o });
+
+// Skutečný případ tt43691383: filmový endpoint Cinemety vrací „Baby Daze“ (1939), seriálový goblin anime.
+const babyDaze = { type: 'movie', name: 'Baby Daze', year: 1939, directors: [], cast: ['A B', 'C D'] };
+const goblin = { type: 'series', name: "So What's Wrong with Getting Reborn as a Goblin", year: 2026, directors: [], cast: ['X Y'] };
+const goblinSearch = {
+  movies: [cand({ id: 484566, title: 'Baby Daze', year: 1939, type: 'film', creators: { directors: [], actors: [{ name: 'A B' }, { name: 'C D' }] } })],
+  tvSeries: [cand({ id: 1897405, title: 'Tensei Goblin dakedo Shitsumon Aru?', year: 2026, type: 'series' })]
+};
+const goblinDetail = {
+  title: 'Tensei Goblin dakedo Shitsumon Aru?', year: 2026, type: 'series', rating: null, ratingCount: 6,
+  titlesOther: [{ country: 'Japonsko', title: '転生ゴブリンだけど質問ある？' }, { country: 'USA', title: "So What's Wrong with Getting Reborn as a Goblin?" }]
+};
+
+test('typ z požadavku: seriál se nespáruje s chybným filmem z Cinemety', async () => {
+  const s = fbSetup({ metas: { movie: babyDaze, series: goblin }, search: goblinSearch, details: { 1897405: goblinDetail } });
+  const r = await s.resolver.resolve('tt43691383', { type: 'series' });
+  assert.deepEqual(s.calls.getMeta, ['series'], 'jen seriálový endpoint');
+  assert.equal(r.csfdId, 1897405);
+  assert.equal(s.db.ownGet('tt43691383').matched_by, 'alt-title,year');
+  assert.equal(s.calls.movie, 1, 'detail z hledání se použil i pro hodnocení (žádný request navíc)');
+  assert.equal(s.resolver.stats.fallback.altTitle, 1);
+});
+
+test('bez typu: oba endpointy se shodou → nejednoznačné, nic se neuloží', async () => {
+  const s = fbSetup({ metas: { movie: babyDaze, series: goblin }, search: goblinSearch, details: { 1897405: goblinDetail } });
+  const r = await s.resolver.findMatch('tt43691383');
+  assert.equal(r.match, null);
+  assert.equal(r.reason, 'ambiguous-type');
+  assert.equal(s.db.ownGet('tt43691383'), undefined);
+});
+
+test('bez typu: shoda jen u jednoho endpointu se přijme', async () => {
+  const s = fbSetup({ metas: { movie: babyDaze, series: goblin }, search: { movies: [], tvSeries: goblinSearch.tvSeries }, details: { 1897405: goblinDetail } });
+  const r = await s.resolver.findMatch('tt43691383');
+  assert.equal(r.match.id, 1897405);
+});
+
+test('alternativní názvy: víc kandidátů se stejným názvem → nejednoznačné', async () => {
+  const twin = { ...goblinDetail };
+  const s = fbSetup({
+    metas: { series: goblin },
+    search: { movies: [], tvSeries: [goblinSearch.tvSeries[0], cand({ id: 2, title: 'Jiný', year: 2026, type: 'series' })] },
+    details: { 1897405: goblinDetail, 2: twin }
+  });
+  const r = await s.resolver.findMatch('tt1', 'series');
+  assert.equal(r.match, null);
+  assert.equal(r.reason, 'ambiguous');
+});
+
+test('alternativní názvy: jiný rok než ±1 se ani nestahuje', async () => {
+  const s = fbSetup({
+    metas: { series: goblin },
+    search: { movies: [], tvSeries: [cand({ id: 3, title: 'Starý', year: 2010, type: 'series' })] },
+    details: { 3: goblinDetail }
+  });
+  const r = await s.resolver.findMatch('tt1', 'series');
+  assert.equal(r.match, null);
+  assert.equal(s.calls.movie, 0);
+});

@@ -65,3 +65,17 @@ test('getSeriesStatus: platná odpověď, jiné ID, 404', async () => {
   assert.equal(wrong, null);
   assert.equal(await getSeriesStatus('tt0903747', { fetchImpl: fakeCinemeta({ series: 404 }) }), null);
 });
+
+import { getMetas } from '../src/cinemeta.js';
+
+test('getMeta s typem a getMetas: skutečný případ tt43691383', async () => {
+  const fetchImpl = fakeCinemeta({
+    movie: { id: 'tt43691383', imdb_id: 'tt43691383', type: 'movie', name: 'Baby Daze', year: '1939' },
+    series: { id: 'tt43691383', imdb_id: 'tt43691383', type: 'series', name: "So What's Wrong with Getting Reborn as a Goblin", releaseInfo: '2026–' }
+  });
+  assert.equal((await getMeta('tt43691383', { fetchImpl })).name, 'Baby Daze', 'bez typu film napřed (stará cesta)');
+  const s = await getMeta('tt43691383', { type: 'series', fetchImpl });
+  assert.equal(s.type, 'series');
+  assert.equal(s.year, 2026);
+  assert.deepEqual((await getMetas('tt43691383', { fetchImpl })).map((m) => m.type), ['movie', 'series']);
+});

@@ -42,7 +42,8 @@ export function createServer({
       const m = req.method === 'GET' && path.match(IMDB_RE);
       if (m) {
         const imdbId = m[1];
-        const r = await resolver.resolve(imdbId);
+        const t = url.searchParams.get('type');
+        const r = await resolver.resolve(imdbId, { type: t === 'movie' || t === 'series' ? t : undefined });
         if (!r) return send(res, 404, { imdbId, found: false }, { 'Cache-Control': 'public, max-age=3600' });
         const row = r.row;
         return send(
@@ -104,7 +105,7 @@ export function createServer({
         if (!parsed) return send(res, 200, { ratings: [] }, { 'Cache-Control': 'public, max-age=86400' });
         let result = null;
         try {
-          result = await resolver.resolve(parsed.imdbId);
+          result = await resolver.resolve(parsed.imdbId, { type: parsed.type });
         } catch (e) {
           // ČSFD/Cinemeta nedostupné a nic v cache — Nuvio prostě nic nezobrazí.
           console.error(`[ratings] ${parsed.imdbId}: ${e.message}`);

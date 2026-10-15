@@ -23,30 +23,45 @@ export function isValidMeta(meta, imdbId, type) {
   return true;
 }
 
+async function fetchMeta(imdbId, type, { fetchImpl = fetch, timeoutMs = 10_000 } = {}) {
+  const res = await fetchImpl(`${BASE}/${type}/${imdbId}.json`, { signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) {
+    if (res.status === 404) return null;
+    throw new Error(`Cinemeta HTTP ${res.status}`);
+  }
+  const meta = (await res.json())?.meta;
+  if (!isValidMeta(meta, imdbId, type)) return null;
+  return {
+    type,
+    name: meta.name,
+    year: firstYear(meta.year ?? meta.releaseInfo),
+    directors: toList(meta.director),
+    cast: toList(meta.cast)
+  };
+}
+
 /**
  * Vrátí { type: 'movie'|'series', name, year, directors[], cast[] } nebo null.
- * Typ z IMDb ID neznáme, proto se zkouší film i seriál a bere se první platná odpověď.
+ * S `type` se ptá jen na daný endpoint. Bez typu zkusí film, pak seriál, a vezme první platnou odpověď.
+ * Pozor: Cinemeta pod stejným IMDb ID někdy vrací na filmovém endpointu úplně jiný titul,
+ * proto má fallback typ znát (Nuvio ho posílá), nebo použít getMetas.
  */
-export async function getMeta(imdbId, { fetchImpl = fetch, timeoutMs = 10_000 } = {}) {
-  for (const type of ['movie', 'series']) {
-    const res = await fetchImpl(`${BASE}/${type}/${imdbId}.json`, {
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-    if (!res.ok) {
-      if (res.status === 404) continue;
-      throw new Error(`Cinemeta HTTP ${res.status}`);
-    }
-    const meta = (await res.json())?.meta;
-    if (!isValidMeta(meta, imdbId, type)) continue;
-    return {
-      type,
-      name: meta.name,
-      year: firstYear(meta.year ?? meta.releaseInfo),
-      directors: toList(meta.director),
-      cast: toList(meta.cast)
-    };
+export async function getMeta(imdbId, { type, ...opts } = {}) {
+  for (const t of type ? [type] : ['movie', 'series']) {
+    const meta = await fetchMeta(imdbId, t, opts);
+    if (meta) return meta;
   }
   return null;
+}
+
+/** Platné odpovědi z obou endpointů (0–2 položky). */
+export async function getMetas(imdbId, opts = {}) {
+  const out = [];
+  for (const t of ['movie', 'series']) {
+    const meta = await fetchMeta(imdbId, t, opts);
+    if (meta) out.push(meta);
+  }
+  return out;
 }
 
 /**

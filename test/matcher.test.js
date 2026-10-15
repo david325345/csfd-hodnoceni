@@ -95,3 +95,20 @@ test('dva stejně dobří kandidáti → ambiguous', () => {
   assert.equal(r.candidate, null);
   assert.equal(r.reason, 'ambiguous');
 });
+
+import { altTitleCandidates, titleMatchesAny } from '../src/matcher.js';
+
+test('titleMatchesAny: anglický alternativní název, interpunkce', () => {
+  const d = { title: 'Tensei Goblin dakedo Shitsumon Aru?', titlesOther: [{ title: "So What's Wrong with Getting Reborn as a Goblin?" }] };
+  assert.equal(titleMatchesAny("So What's Wrong with Getting Reborn as a Goblin", d), true);
+  assert.equal(titleMatchesAny('Tensei Goblin dakedo Shitsumon Aru', d), true);
+  assert.equal(titleMatchesAny('Goblin Slayer', d), false);
+});
+
+test('altTitleCandidates: typ, rok ±1, přesný rok napřed, max 3', () => {
+  const meta = { type: 'series', year: 2026 };
+  const mk = (id, year, type = 'series') => ({ id, year, type, title: 'x' });
+  const r = altTitleCandidates(meta, { tvSeries: [mk(1, 2025), mk(2, 2026), mk(3, 2020), mk(4, 2026, 'episode'), mk(5, 2027), mk(6, 2026)] });
+  assert.deepEqual(r.map((c) => c.id), [2, 6, 1]);
+  assert.deepEqual(altTitleCandidates({ type: 'series', year: null }, { tvSeries: [mk(1, 2026)] }), []);
+});

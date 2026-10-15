@@ -70,3 +70,25 @@ export function pickMatch(meta, search) {
   }
   return scored[0];
 }
+
+/**
+ * Kandidáti pro shodu přes alternativní názvy: správný typ a rok ±1 (rok musí být známý
+ * na obou stranách). Seřazení: přesný rok napřed. Nejvýš `max` kandidátů.
+ */
+export function altTitleCandidates(meta, search, max = 3) {
+  if (!meta.year) return [];
+  const pool = meta.type === 'series' ? search?.tvSeries ?? [] : search?.movies ?? [];
+  const allowed = meta.type === 'series' ? SERIES_TYPES : MOVIE_TYPES;
+  return pool
+    .filter((c) => allowed.has(c.type) && Number.isFinite(c.year) && Math.abs(c.year - meta.year) <= 1)
+    .sort((a, b) => Math.abs(a.year - meta.year) - Math.abs(b.year - meta.year))
+    .slice(0, max);
+}
+
+/** Shoduje se název z Cinemety s hlavním nebo některým alternativním názvem z detailu ČSFD? */
+export function titleMatchesAny(name, detail) {
+  const n = normalize(name);
+  if (!n) return false;
+  const titles = [detail?.title, ...(detail?.titlesOther ?? []).map((t) => t.title)];
+  return titles.some((t) => normalize(t) === n);
+}
