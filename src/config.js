@@ -31,6 +31,12 @@ export const config = {
   // Jak často u ukončeného seriálu ověřit v Cinemetě, že je pořád ukončený.
   seriesStatusCheckDays: num('SERIES_STATUS_CHECK_DAYS', 30),
   missTtlDays: num('MISS_TTL_DAYS', 7),
+  // Hodnocení dílů: podle data posledního dílu série (Cinemeta) 2+ roky / loňská / letošní a bez data.
+  ttlEpisodeOldDays: num('RATING_TTL_EPISODE_OLD_DAYS', 365),
+  ttlEpisodeLastYearDays: num('RATING_TTL_EPISODE_LAST_YEAR_DAYS', 90),
+  ttlEpisodeNewDays: num('RATING_TTL_EPISODE_NEW_DAYS', 3),
+  // Max. stránek seznamu dílů (500 dílů na stránku).
+  episodeMaxPages: num('EPISODE_MAX_PAGES', 6),
 
   // Šetrnost k ČSFD
   csfdConcurrency: num('CSFD_CONCURRENCY', 2),

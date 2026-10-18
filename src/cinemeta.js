@@ -89,3 +89,35 @@ export async function getSeriesStatus(imdbId, { fetchImpl = fetch, timeoutMs = 8
   if (!isValidMeta(meta, imdbId, 'series')) return null;
   return parseSeriesStatus(meta);
 }
+
+/**
+ * Díly seriálu z Cinemety (bez série 0):
+ * { seasons: { [s]: { count, lastReleased } }, released: { "s:e": ms } } nebo null.
+ * `lastReleased` = datum posledního dílu série (ms), slouží k určení stáří série.
+ */
+export function summarizeVideos(videos) {
+  const seasons = {};
+  const released = {};
+  for (const v of Array.isArray(videos) ? videos : []) {
+    const s = Number(v.season);
+    const e = Number(v.episode ?? v.number);
+    if (!Number.isInteger(s) || s < 1 || !Number.isInteger(e)) continue;
+    const t = Date.parse(v.released ?? v.firstAired ?? '');
+    const k = `${s}:${e}`;
+    if (k in released) continue;
+    released[k] = Number.isFinite(t) ? t : null;
+    const info = (seasons[s] ??= { count: 0, lastReleased: null });
+    info.count++;
+    if (Number.isFinite(t) && (info.lastReleased == null || t > info.lastReleased)) info.lastReleased = t;
+  }
+  return Object.keys(seasons).length ? { seasons, released } : null;
+}
+
+export async function getSeriesVideos(imdbId, { fetchImpl = fetch, timeoutMs = 8_000 } = {}) {
+  const res = await fetchImpl(`${BASE}/series/${imdbId}.json`, { signal: AbortSignal.timeout(timeoutMs) });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Cinemeta HTTP ${res.status}`);
+  const meta = (await res.json())?.meta;
+  if (!isValidMeta(meta, imdbId, 'series')) return null;
+  return summarizeVideos(meta.videos);
+}

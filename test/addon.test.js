@@ -7,8 +7,10 @@ import { buildManifest, parseRatingsPath, publicBaseUrl, ratingsPayload } from '
 test('parseRatingsPath: film, seriál, epizoda, neplatné', () => {
   assert.deepEqual(parseRatingsPath('/ratings/movie/tt0110912.json'), { type: 'movie', imdbId: 'tt0110912' });
   assert.deepEqual(parseRatingsPath('/ratings/series/tt0903747.json'), { type: 'series', imdbId: 'tt0903747' });
-  assert.deepEqual(parseRatingsPath('/ratings/series/tt0903747%3A1%3A2.json'), { type: 'series', imdbId: 'tt0903747' });
-  assert.deepEqual(parseRatingsPath('/ratings/series/tt0903747:1:2.json'), { type: 'series', imdbId: 'tt0903747' });
+  const ep = { type: 'series', imdbId: 'tt0903747', season: 1, episode: 2 };
+  assert.deepEqual(parseRatingsPath('/ratings/series/tt0903747%3A1%3A2.json'), ep);
+  assert.deepEqual(parseRatingsPath('/ratings/series/tt0903747:1:2.json'), ep);
+  assert.deepEqual(parseRatingsPath('/ratings/series/tt0903747:0:3.json'), { ...ep, season: 0, episode: 3 });
   assert.equal(parseRatingsPath('/ratings/movie/kitsu:123.json'), null);
   assert.equal(parseRatingsPath('/ratings/tv/tt0110912.json'), null);
   assert.equal(parseRatingsPath('/ratings/movie/tt0110912'), null);
@@ -21,8 +23,10 @@ test('manifest odpovídá formátu Nuvia (ratings resource + ratingSources)', ()
   assert.deepEqual(m.resources[0].types, ['movie', 'series']);
   assert.deepEqual(m.resources[0].idPrefixes, ['tt']);
   assert.deepEqual(m.ratingSources, [
-    { source: 'csfd', name: 'ČSFD', max: 100, icon: 'https://csfd.example.cz/icon.png' }
+    { source: 'csfd', name: 'ČSFD', max: 100, icon: 'https://csfd.example.cz/icon.png', episodes: true }
   ]);
+  const noEp = buildManifest({ baseUrl: 'https://x', hasIcon: false, version: '1', episodes: false });
+  assert.equal('episodes' in noEp.ratingSources[0], false);
   const noIcon = buildManifest({ baseUrl: 'https://x', hasIcon: false, version: '1' });
   assert.equal('icon' in noIcon.ratingSources[0], false);
   assert.equal('logo' in noIcon, false);

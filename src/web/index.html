@@ -84,6 +84,22 @@
   button:hover { filter: brightness(1.08); }
   button:disabled { opacity: .6; cursor: default; }
   .note { color: var(--muted); font-size: 15px; margin: 8px 0 0; }
+  /* Přepínač hodnocení dílů */
+  .toggle { display: flex; align-items: flex-start; gap: 12px; margin-top: 14px; cursor: pointer; max-width: 62ch; }
+  .toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .toggle .track {
+    flex: none; position: relative; width: 44px; height: 26px; margin-top: 1px;
+    background: var(--line); border-radius: 13px; transition: background .15s;
+  }
+  .toggle .track::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
+    background: var(--text); border-radius: 50%; transition: transform .15s;
+  }
+  .toggle input:checked + .track { background: var(--good); }
+  .toggle input:checked + .track::after { transform: translateX(18px); }
+  .toggle input:focus-visible + .track { outline: 3px solid var(--focus); outline-offset: 3px; }
+  .toggle .label strong { display: block; font-weight: 700; }
+  .toggle .label span { color: var(--muted); font-size: 15px; }
   .qr { width: 196px; text-align: center; }
   .qr .code { background: #fff; padding: 10px; border-radius: 8px; line-height: 0; }
   .qr .code svg, .qr .code img { width: 100%; height: auto; display: block; }
@@ -109,7 +125,7 @@
     <div>
       <div class="brand"><img src="/icon.png" alt="" data-icon hidden><span>Addon pro Nuvio na Apple TV</span></div>
       <h1>Hodnocení z&nbsp;ČSFD přímo v&nbsp;Nuviu</h1>
-      <p class="lead">U každého filmu a seriálu uvidíš v detailu procenta z&nbsp;ČSFD hned vedle IMDb a&nbsp;dalších hodnocení. Klepnutím otevřeš stránku na ČSFD.</p>
+      <p class="lead">U každého filmu a seriálu uvidíš v detailu procenta z&nbsp;ČSFD hned vedle IMDb a&nbsp;dalších hodnocení, u seriálů i&nbsp;u jednotlivých dílů. Klepnutím otevřeš stránku na ČSFD.</p>
     </div>
   </div>
 </header>
@@ -121,6 +137,14 @@
       <ol class="steps">
         <li>
           Zkopíruj adresu addonu.
+          <label class="toggle">
+            <input type="checkbox" id="episodes" checked>
+            <span class="track" aria-hidden="true"></span>
+            <span class="label">
+              <strong>Hodnocení jednotlivých dílů</strong>
+              <span>U seriálů ukáže procenta z ČSFD i u každého dílu. Vypnutím dostaneš jinou adresu addonu; když přepínáš u nainstalovaného addonu, odeber ho v Nuviu a přidej znovu s novou adresou.</span>
+            </span>
+          </label>
           <div class="field">
             <input id="manifest" type="text" readonly aria-label="Adresa addonu" value="">
             <button type="button" id="copy">Kopírovat</button>
@@ -129,11 +153,11 @@
         <li>V Nuviu otevři nastavení addonů a přidej addon s touto adresou.</li>
         <li>
           Otevři detail libovolného filmu nebo seriálu. Hodnocení ČSFD se ukáže v řádku s hodnocením.
-          <p class="note">Hodnocení z addonů umí Nuvio pro tvOS od verze 3.4.4. Zdroj ČSFD jde vypnout v nastavení Integrations → MDBList Ratings &amp; Badges → Add-on Rating Providers.</p>
+          <p class="note">Hodnocení z addonů umí Nuvio pro tvOS od verze 3.4.4, hodnocení dílů od novější verze. Zdroj ČSFD jde vypnout v nastavení Integrations → MDBList Ratings &amp; Badges → Add-on Rating Providers.</p>
         </li>
       </ol>
       <div class="qr">
-        <div class="code"><img src="/qr.svg" alt="QR kód s adresou addonu" width="176" height="176"></div>
+        <div class="code"><img id="qr" src="/qr.svg" alt="QR kód s adresou addonu" width="176" height="176"></div>
         <p>Naskenuj telefonem a adresu vlož do Apple TV přes klávesnici v iPhonu.</p>
       </div>
     </div>
@@ -149,8 +173,15 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const manifestUrl = location.origin + '/manifest.json';
-  $('manifest').value = manifestUrl;
+  let manifestUrl = '';
+  const update = () => {
+    const on = $('episodes').checked;
+    manifestUrl = location.origin + (on ? '' : '/bez-dilu') + '/manifest.json';
+    $('manifest').value = manifestUrl;
+    $('qr').src = on ? '/qr.svg' : '/qr.svg?dily=0';
+  };
+  $('episodes').addEventListener('change', update);
+  update();
 
   // Ikona jen pokud existuje
   const iconProbe = new Image();

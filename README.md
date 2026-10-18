@@ -20,21 +20,31 @@ Malá služba, která k IMDb ID vrátí hodnocení z ČSFD. Určená jako zdroj 
    - **seriály** podle stavu z Cinemety (`status` + `releaseInfo`): ukončené 365 dní, běžící a nezjištěné 3 dny. U ukončených se každých 30 dní (při dotazu) ověří v Cinemetě, že jsou pořád ukončené se stejným rokem konce. Když se seriál rozjel nebo přibyla sezóna, hodnocení se hned stáhne znovu a seriál se dál bere jako běžící. Kontrola stavu na ČSFD nic neposílá.
    - Když je ČSFD nedostupné, vrátí se starší uložené hodnocení s `"stale": true`.
 
+4. **Hodnocení dílů** (seriály, `tt…:S:E`):
+   - Celý seznam dílů seriálu (všechny série, i s hodnocením) se stáhne jedním dotazem z `/film/{id}/epizody/` (500 dílů na stránku, víc stránek jen u dlouhých seriálů) a uloží do DB. Souběžné dotazy na díly stejného seriálu čekají na jedno stažení.
+   - Hodnocení se vrátí jen při přesné shodě série a dílu se značkou na ČSFD (`S01E05`). Prázdno, když: ČSFD čísluje díly za sebou a Cinemeta má víc sérií (One Piece a jiná dlouhá anime), ČSFD má v sérii méně dílů než Cinemeta (hrozí posun), série 0 (speciály), díl bez hodnocení. Díly navíc na konci série (vánoční speciály u Doctor Who) nevadí. Na hodnocení seriálu se nepřepíná.
+   - Platnost podle data posledního dílu dané série z Cinemety: 2 a víc let stará série 365 dní, loňská 90 dní, letošní a bez data 3 dny. Seznam se stahuje celý, takže při obnově aktuální série se obnoví i starší.
+   - Když požadovaný díl v uloženém seznamu chybí a podle Cinemety vyšel až po posledním stažení, seznam se stáhne hned.
+   - Seznam dílů node-csfd-api neumí, parser je vlastní (`src/episodes.js`). Cookie ověření proti botům bere z knihovny; když ČSFD vrátí ověření, vyřeší se stažením detailu seriálu přes knihovnu a zkusí se znovu.
+
 Na ČSFD se jde jen na vyžádání, přes frontu (max. 2 požadavky souběžně, 500 ms rozestup). Cookie anti-bot ochrany Anubis (platí ~týden, vázané na IP serveru) se ukládá do databáze, aby se po restartu nemuselo řešit znovu.
 
 Knihovna [node-csfd-api](https://github.com/bartholomej/node-csfd-api) je použitá **beze změn**, zamčená na verzi `5.13.1`. Databáze je vestavěné SQLite z Node (`node:sqlite`, Node ≥ 22.13), takže služba nemá žádné nativní závislosti. Jediná závislost je node-csfd-api.
 
 ## Instalační stránka
 
-Na adrese `/` je instalační stránka: adresa manifestu s tlačítkem Kopírovat, QR kód (`/qr.svg`, generovaný lokálně), vyzkoušení podle IMDb ID a stav mapování. Adresu manifestu si stránka bere z adresy, na které je otevřená. QR kód používá `PUBLIC_URL`, jinak hlavičky proxy. Nuvio vyžaduje HTTPS.
+Na adrese `/` je instalační stránka: přepínač hodnocení dílů, adresa manifestu s tlačítkem Kopírovat, QR kód (`/qr.svg`, s vypnutými díly `/qr.svg?dily=0`, generovaný lokálně) a stav mapování. Adresu manifestu si stránka bere z adresy, na které je otevřená. QR kód používá `PUBLIC_URL`, jinak hlavičky proxy. Nuvio vyžaduje HTTPS.
 
 ## Nuvio / Stremio addon
 
 Služba je zároveň Stremio addon s externím hodnocením ve formátu NuvioTVOS (resource `ratings` + `ratingSources`).
 
 - **Instalace:** v Nuviu přidat addon s adresou `https://<adresa-služby>/manifest.json`.
-- `GET /manifest.json` — addon „ČSFD hodnocení“, zdroj `csfd`, stupnice `max: 100` (Nuvio zobrazí procenta).
-- `GET /ratings/{movie|series}/{tt…}.json` — `{"ratings":[{"source":"csfd","value":91,"url":"https://www.csfd.cz/film/8852/"}]}`. ID epizody (`tt…:S:E`) se bere jako celý seriál. Nenalezeno, chybějící hodnocení nebo nedostupné ČSFD = `{"ratings":[]}` s HTTP 200 (Nuvio nic nezobrazí).
+- `GET /manifest.json` — addon „ČSFD hodnocení“, zdroj `csfd`, stupnice `max: 100` (Nuvio zobrazí procenta), `episodes: true` (Nuvio se ptá i na díly).
+- `GET /bez-dilu/manifest.json` — stejný addon bez hodnocení dílů (bez `episodes`). Všechny cesty pod `/bez-dilu/` fungují stejně, díl se tam bere jako celý seriál.
+- `GET /ratings/{movie|series}/{tt…}.json` — `{"ratings":[{"source":"csfd","value":91,"url":"https://www.csfd.cz/film/8852/"}]}`.
+- `GET /ratings/series/{tt…:S:E}.json` — hodnocení dílu (zaokrouhlené na celá procenta), odkaz vede na stránku dílu na ČSFD.
+- Nenalezeno, chybějící hodnocení nebo nedostupné ČSFD = `{"ratings":[]}` s HTTP 200 (Nuvio nic nezobrazí).
 - **Ikona:** `public/icon.png` (čtverec 256×256 px, PNG s průhledným pozadím, čitelná na tmavém pozadí). Když chybí, manifest ikonu neuvádí a Nuvio ukáže hvězdičku. Nuvio ji vykresluje do 38×38 bodů vedle čísla, název zdroje se v detailu nepíše.
 - Adresa ikony v manifestu se skládá z `PUBLIC_URL`, jinak z hlaviček reverse proxy (`X-Forwarded-Proto/Host`).
 
@@ -65,6 +75,10 @@ Služba je zároveň Stremio addon s externím hodnocením ve formátu NuvioTVOS
 - Nenalezeno: `404 {"imdbId": "...", "found": false}`.
 - ČSFD nedostupné a nic v cache: `503`.
 
+### `GET /rating/{imdbId}?season=S&episode=E`
+
+Hodnocení dílu pro ruční kontrolu: `rating` (zaokrouhlené), `ratingExact` (jak je na ČSFD, např. 92.5), `title`, `url`, `seriesCsfdId`. Nenalezeno = `404` s `reason`: `series-not-found`, `not-series`, `season0`, `absolute`, `season-short`, `not-found`, `no-rating`, `empty-list`.
+
 ### `GET /stats`
 
 Počty párů, stav poslední obnovy Wikidat, velikost cache, fronta na ČSFD a čítače resolveru. Důležité položky:
@@ -73,6 +87,8 @@ Počty párů, stav poslední obnovy Wikidat, velikost cache, fronta na ČSFD a 
 - `wikidata.imdbWithMultipleCsfd` — kolik IMDb ID má na Wikidatech víc ČSFD ID. Zatím se bere první, které není sezóna/díl.
 - `resolver.fallback` — `attempts / matched / noMatch / ambiguous / noMeta / errors`. Když `errors` výrazně roste, ČSFD nebo Cinemeta nejspíš blokuje nebo změnilo web.
 - `resolver.staleServed` — kolikrát se vrátilo starší hodnocení kvůli nedostupnému ČSFD.
+- `episodes` — dotazy na díly: `found`, `listFetches` (stažení seznamu z ČSFD), `listCacheHits`, `newEpisodeRefetch`, `staleServed`, `challengeRetries`, `skipped.*` (důvody prázdné odpovědi), `errors`. Když `skipped.emptyList` nebo `errors` výrazně roste, ČSFD nejspíš změnilo stránku se seznamem dílů.
+- `tables.episodeLists` / `episodesCached` — počet uložených seriálů a dílů.
 
 ### `GET /health`
 
@@ -103,6 +119,10 @@ curl -X POST -H "Authorization: Bearer TOKEN" "http://localhost:7020/admin/refre
 | `RATING_TTL_SERIES_ONGOING_DAYS` | `3` | běžící seriály a seriály s nezjištěným stavem |
 | `SERIES_STATUS_CHECK_DAYS` | `30` | jak často ověřit, že ukončený seriál je pořád ukončený |
 | `MISS_TTL_DAYS` | `7` | jak dlouho se znovu nehledá nenalezený titul |
+| `RATING_TTL_EPISODE_OLD_DAYS` | `365` | díly série, jejíž poslední díl je 2 a víc let starý |
+| `RATING_TTL_EPISODE_LAST_YEAR_DAYS` | `90` | díly loňské série |
+| `RATING_TTL_EPISODE_NEW_DAYS` | `3` | díly letošní série a série bez data |
+| `EPISODE_MAX_PAGES` | `6` | max. stránek seznamu dílů (500 dílů na stránku) |
 | `CSFD_CONCURRENCY` | `2` | souběžné požadavky na ČSFD |
 | `CSFD_DELAY_MS` | `500` | min. rozestup požadavků na ČSFD |
 | `ADMIN_TOKEN` | prázdné | token pro `/admin/refresh-wikidata` |

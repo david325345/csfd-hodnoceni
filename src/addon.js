@@ -3,6 +3,18 @@ import { existsSync, readFileSync } from 'node:fs';
 
 export const ADDON_ID = 'cz.csfd-ratings.selfhosted';
 export const RATING_SOURCE = 'csfd';
+/** Varianta addonu bez hodnocení dílů: /bez-dilu/manifest.json (a /bez-dilu/ratings/…). */
+export const NO_EPISODES_PREFIX = '/bez-dilu';
+
+/** Rozdělí cestu na variantu a zbytek: { episodes, path }. */
+export function splitVariant(path) {
+  if (path === NO_EPISODES_PREFIX || path.startsWith(`${NO_EPISODES_PREFIX}/`)) {
+    return { episodes: false, path: path.slice(NO_EPISODES_PREFIX.length) || '/' };
+  }
+  return { episodes: true, path };
+}
+
+export const manifestPath = (episodes) => `${episodes ? '' : NO_EPISODES_PREFIX}/manifest.json`;
 
 /** Načte ikonu, pokud existuje. Bez ikony manifest ikonu neuvádí. */
 export function loadIcon(path) {
@@ -21,14 +33,18 @@ export function publicBaseUrl(req, configured) {
   return `${proto}://${host}`;
 }
 
-export function buildManifest({ baseUrl, hasIcon, version }) {
+export function buildManifest({ baseUrl, hasIcon, version, episodes = true }) {
   const source = { source: RATING_SOURCE, name: 'ČSFD', max: 100 };
   if (hasIcon) source.icon = `${baseUrl}/icon.png`;
+  // Nuvio se ptá na hodnocení dílů (tt…:S:E) jen u zdrojů s episodes: true.
+  if (episodes) source.episodes = true;
   const manifest = {
     id: ADDON_ID,
     version,
     name: 'ČSFD hodnocení',
-    description: 'Hodnocení z ČSFD.cz podle IMDb ID (filmy a seriály).',
+    description: episodes
+      ? 'Hodnocení z ČSFD.cz podle IMDb ID (filmy, seriály a jednotlivé díly).'
+      : 'Hodnocení z ČSFD.cz podle IMDb ID (filmy a seriály).',
     types: ['movie', 'series'],
     idPrefixes: ['tt'],
     resources: [{ name: 'ratings', types: ['movie', 'series'], idPrefixes: ['tt'] }],
@@ -41,8 +57,8 @@ export function buildManifest({ baseUrl, hasIcon, version }) {
 }
 
 /**
- * Parsuje cestu /ratings/{type}/{id}.json. ID může být i epizoda (tt…:S:E),
- * hodnocení se pak bere pro celý seriál. Vrací { type, imdbId } nebo null.
+ * Parsuje cestu /ratings/{type}/{id}.json. ID může být i díl (tt…:S:E).
+ * Vrací { type, imdbId, season, episode } (season/episode jen u dílu) nebo null.
  */
 export function parseRatingsPath(path) {
   const m = path.match(/^\/ratings\/(movie|series)\/([^/]+?)\.json$/);
@@ -53,9 +69,14 @@ export function parseRatingsPath(path) {
   } catch {
     return null;
   }
-  const imdb = id.match(/^(tt\d{5,10})(?::\d+:\d+)?$/);
+  const imdb = id.match(/^(tt\d{5,10})(?::(\d+):(\d+))?$/);
   if (!imdb) return null;
-  return { type: m[1], imdbId: imdb[1] };
+  const out = { type: m[1], imdbId: imdb[1] };
+  if (imdb[2] !== undefined) {
+    out.season = Number(imdb[2]);
+    out.episode = Number(imdb[3]);
+  }
+  return out;
 }
 
 /** Odpověď ve formátu Nuvia z výsledku resolveru. */
@@ -70,4 +91,19 @@ export function ratingsPayload(result) {
       }
     ]
   };
+}
+
+/** Odpověď ve formátu Nuvia pro díl (výsledek createEpisodeResolver().resolveEpisode). */
+export function episodePayload(result) {
+  const ep = result?.ep;
+  if (!ep || !Number.isFinite(ep.rating)) return { ratings: [] };
+  return {
+    ratings: [{ source: RATING_SOURCE, value: Math.round(ep.rating), url: episodeUrl(result.seriesCsfdId, ep) }]
+  };
+}
+
+export function episodeUrl(seriesCsfdId, ep) {
+  if (ep.path) return `https://www.csfd.cz${ep.path}`;
+  if (ep.csfdId) return `https://www.csfd.cz/film/${seriesCsfdId}/${ep.csfdId}/`;
+  return `https://www.csfd.cz/film/${seriesCsfdId}/epizody/`;
 }

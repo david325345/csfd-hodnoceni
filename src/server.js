@@ -1,6 +1,15 @@
 import http from 'node:http';
 import QRCode from 'qrcode';
-import { buildManifest, parseRatingsPath, publicBaseUrl, ratingsPayload } from './addon.js';
+import {
+  buildManifest,
+  episodePayload,
+  episodeUrl,
+  manifestPath,
+  parseRatingsPath,
+  publicBaseUrl,
+  ratingsPayload,
+  splitVariant
+} from './addon.js';
 
 const IMDB_RE = /^\/rating\/(tt\d{5,10})\/?$/;
 
@@ -16,6 +25,7 @@ const send = (res, status, body, extraHeaders = {}) => {
 export function createServer({
   db,
   resolver,
+  episodes = null,
   refresher,
   csfdClient,
   config,
@@ -27,7 +37,10 @@ export function createServer({
   const qrCache = new Map();
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
-    const path = url.pathname;
+    const variant = splitVariant(url.pathname);
+    const path = variant.path;
+    // Hodnocení dílů jen v hlavní variantě a jen když je služba má zapnuté.
+    const withEpisodes = variant.episodes && Boolean(episodes);
 
     try {
       if (req.method === 'OPTIONS') {
@@ -40,6 +53,24 @@ export function createServer({
       }
 
       const m = req.method === 'GET' && path.match(IMDB_RE);
+      if (m && episodes && url.searchParams.has('season') && url.searchParams.has('episode')) {
+        const imdbId = m[1];
+        const season = Number(url.searchParams.get('season'));
+        const episode = Number(url.searchParams.get('episode'));
+        if (!Number.isInteger(season) || !Number.isInteger(episode)) return send(res, 400, { error: 'bad season/episode' });
+        const r = await episodes.resolveEpisode(imdbId, season, episode);
+        const body = { imdbId, season, episode, found: Boolean(r.ep), seriesCsfdId: r.seriesCsfdId ?? null };
+        if (r.ep) {
+          Object.assign(body, {
+            csfdId: r.ep.csfdId,
+            title: r.ep.title,
+            rating: Math.round(r.ep.rating),
+            ratingExact: r.ep.rating,
+            url: episodeUrl(r.seriesCsfdId, r.ep)
+          });
+        } else body.reason = r.reason;
+        return send(res, r.ep ? 200 : 404, body, { 'Cache-Control': 'public, max-age=3600' });
+      }
       if (m) {
         const imdbId = m[1];
         const t = url.searchParams.get('type');
@@ -78,7 +109,7 @@ export function createServer({
       }
 
       if (req.method === 'GET' && path === '/qr.svg') {
-        const target = `${publicBaseUrl(req, config.publicUrl)}/manifest.json`;
+        const target = `${publicBaseUrl(req, config.publicUrl)}${manifestPath(url.searchParams.get('dily') !== '0')}`;
         if (!qrCache.has(target)) {
           if (qrCache.size > 20) qrCache.clear();
           qrCache.set(target, await QRCode.toString(target, { type: 'svg', margin: 0, errorCorrectionLevel: 'M' }));
@@ -95,7 +126,8 @@ export function createServer({
         const manifest = buildManifest({
           baseUrl: publicBaseUrl(req, config.publicUrl),
           hasIcon: Boolean(icon),
-          version
+          version,
+          episodes: withEpisodes
         });
         return send(res, 200, manifest, { 'Cache-Control': 'public, max-age=3600' });
       }
@@ -103,15 +135,18 @@ export function createServer({
       if (req.method === 'GET' && path.startsWith('/ratings/')) {
         const parsed = parseRatingsPath(path);
         if (!parsed) return send(res, 200, { ratings: [] }, { 'Cache-Control': 'public, max-age=86400' });
-        let result = null;
+        const isEpisode = withEpisodes && parsed.type === 'series' && parsed.season !== undefined;
+        let payload;
         try {
-          result = await resolver.resolve(parsed.imdbId, { type: parsed.type });
+          payload = isEpisode
+            ? episodePayload(await episodes.resolveEpisode(parsed.imdbId, parsed.season, parsed.episode))
+            : ratingsPayload(await resolver.resolve(parsed.imdbId, { type: parsed.type }));
         } catch (e) {
           // ČSFD/Cinemeta nedostupné a nic v cache — Nuvio prostě nic nezobrazí.
-          console.error(`[ratings] ${parsed.imdbId}: ${e.message}`);
+          const label = isEpisode ? `${parsed.imdbId}:${parsed.season}:${parsed.episode}` : parsed.imdbId;
+          console.error(`[ratings] ${label}: ${e.message}`);
           return send(res, 200, { ratings: [] }, { 'Cache-Control': 'no-store' });
         }
-        const payload = ratingsPayload(result);
         const maxAge = payload.ratings.length ? 21600 : 3600;
         return send(res, 200, payload, { 'Cache-Control': `public, max-age=${maxAge}` });
       }
@@ -151,10 +186,13 @@ export function createServer({
           tables: {
             ownMappings: db.ownCount(),
             missCached: db.missCount(),
-            ratingsCached: db.ratingCount()
+            ratingsCached: db.ratingCount(),
+            episodeLists: db.episodeListStats().n,
+            episodesCached: db.episodeListStats().eps
           },
           csfdQueue: csfdClient.pending,
-          resolver: resolver.stats
+          resolver: resolver.stats,
+          episodes: episodes ? episodes.stats : null
         });
       }
 

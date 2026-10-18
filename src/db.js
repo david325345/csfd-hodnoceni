@@ -32,6 +32,22 @@ CREATE TABLE IF NOT EXISTS rating (
   type         TEXT,
   fetched_at   INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS episode_list (
+  series_csfd INTEGER PRIMARY KEY,
+  has_seasons INTEGER NOT NULL,
+  count       INTEGER NOT NULL,
+  fetched_at  INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS episode_rating (
+  series_csfd INTEGER NOT NULL,
+  season      INTEGER NOT NULL,
+  episode     INTEGER NOT NULL,
+  csfd        INTEGER,
+  path        TEXT,
+  title       TEXT,
+  rating      REAL,
+  PRIMARY KEY (series_csfd, season, episode)
+);
 CREATE TABLE IF NOT EXISTS kv (
   key   TEXT PRIMARY KEY,
   value TEXT
@@ -92,6 +108,18 @@ export function openDb(path) {
     ),
     ratingStatusChecked: db.prepare('UPDATE rating SET status_checked_at = ? WHERE csfd = ?'),
     ratingCount: db.prepare('SELECT COUNT(*) AS n FROM rating'),
+    epListGet: db.prepare('SELECT * FROM episode_list WHERE series_csfd = ?'),
+    epListPut: db.prepare(
+      'INSERT OR REPLACE INTO episode_list (series_csfd, has_seasons, count, fetched_at) VALUES (?, ?, ?, ?)'
+    ),
+    epListCount: db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(count), 0) AS eps FROM episode_list'),
+    epGet: db.prepare('SELECT * FROM episode_rating WHERE series_csfd = ? AND season = ? AND episode = ?'),
+    epAll: db.prepare('SELECT * FROM episode_rating WHERE series_csfd = ? ORDER BY season, episode'),
+    epDel: db.prepare('DELETE FROM episode_rating WHERE series_csfd = ?'),
+    epIns: db.prepare(
+      `INSERT OR REPLACE INTO episode_rating (series_csfd, season, episode, csfd, path, title, rating)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ),
     kvGet: db.prepare('SELECT value FROM kv WHERE key = ?'),
     kvPut: db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)'),
     ...prepareWd()
@@ -163,6 +191,35 @@ export function openDb(path) {
       st.ratingPut.run({ series_status: null, series_end_year: null, status_checked_at: null, ...row }),
     ratingStatusChecked: (csfd, ts) => st.ratingStatusChecked.run(ts, csfd),
     ratingCount: () => st.ratingCount.get().n,
+
+    episodeListGet: (seriesCsfd) => st.epListGet.get(seriesCsfd),
+    episodeListStats: () => st.epListCount.get(),
+    episodeGet: (seriesCsfd, season, episode) => st.epGet.get(seriesCsfd, season, episode),
+    /** Díly ve tvaru z parseEpisodeList (camelCase). */
+    episodesAll: (seriesCsfd) =>
+      st.epAll.all(seriesCsfd).map((r) => ({
+        season: r.season,
+        episode: r.episode,
+        csfdId: r.csfd,
+        path: r.path,
+        title: r.title,
+        rating: r.rating
+      })),
+    /** Nahradí uložený seznam dílů seriálu v jedné transakci. */
+    episodesReplace(seriesCsfd, list, hasSeasons, ts) {
+      db.exec('BEGIN');
+      try {
+        st.epDel.run(seriesCsfd);
+        for (const e of list) {
+          st.epIns.run(seriesCsfd, e.season, e.episode, e.csfdId ?? null, e.path ?? null, e.title ?? null, e.rating ?? null);
+        }
+        st.epListPut.run(seriesCsfd, hasSeasons ? 1 : 0, list.length, ts);
+        db.exec('COMMIT');
+      } catch (e) {
+        db.exec('ROLLBACK');
+        throw e;
+      }
+    },
 
     kvGet: (key) => st.kvGet.get(key)?.value ?? null,
     kvPut: (key, value) => st.kvPut.run(key, value == null ? null : String(value)),
