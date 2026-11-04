@@ -30,7 +30,8 @@ Malá služba, která k IMDb ID vrátí hodnocení z ČSFD. Určená jako zdroj 
 5. **Tituly jen na ČSFD** (bez IMDb), ID `csfd:<ČSFD ID>`, u dílu `csfd:<ID seriálu>:S:E`:
    - Katalog „Jen na ČSFD“ (filmy i seriály) jen pro hledání (`search` je povinný, na Home se neukazuje). Dotaz jde na hledání ČSFD a vrátí jen tituly, u kterých IMDb neznáme. Tituly s IMDb se v Nuviu najdou normálně přes `tt…`.
    - Jak se pozná titul bez IMDb: (1) pár v tabulce (Wikidata nebo vlastní), (2) hledání v Cinemetě podle českého názvu a roku ±1 (shoda se uloží jako vlastní pár, takže pak funguje i hodnocení přes IMDb), (3) česká nebo slovenská produkce bez shody = jen ČSFD; cizí titul se na pozadí ověří i podle originálních názvů z detailu a do výsledků se dostane až při dalším hledání. Výsledek „jen ČSFD“ se po 30 dnech ověří znovu.
-   - Metadata `csfd:` z detailu ČSFD (název, rok, popis, plakát, fotka, žánry, režie, herci, délka, země), u seriálu díly ze seznamu `/epizody/`. ČSFD nemá u dílů datum vysílání, všechny dostanou 1. 1. roku vzniku seriálu. Platnost podle roku jako u filmů.
+   - Metadata `csfd:` z detailu ČSFD (název, rok, popis, plakát, fotka, žánry, režie, herci, délka, země), u seriálu díly ze seznamu `/epizody/`.
+   - Obrázky: plakát → fotka ze scény → vygenerovaný náhled s názvem, rokem a typem (`/poster/csfd-{ID}.png`, PNG 600×900, písmo DejaVu z balíku `fonts-dejavu-core`). Pozadí: fotka, jinak plakát. U výsledků hledání bez plakátu se stáhne detail (uloží se, takže otevření je pak okamžité). ČSFD nemá u dílů datum vysílání, všechny dostanou 1. 1. roku vzniku seriálu. Platnost podle roku jako u filmů.
    - Hodnocení `csfd:` titulů i jejich dílů běží stejně jako u `tt…`. Stažený detail se použije i pro hodnocení, nic se nestahuje dvakrát.
    - Streamy k `csfd:` titulům musí dodat jiné addony s `csfd:` v `idPrefixes` (Webshare, SKTorrent…). Tituly bez IMDb se nesynchronizují s Traktem ani Simkl.
 
@@ -142,6 +143,7 @@ curl -X POST -H "Authorization: Bearer TOKEN" "http://localhost:7020/admin/refre
 | `EPISODE_MAX_PAGES` | `6` | max. stránek seznamu dílů (500 dílů na stránku) |
 | `CSFD_ONLY_RECHECK_DAYS` | `30` | po kolika dnech znovu ověřit, jestli titul „jen na ČSFD“ nedostal IMDb |
 | `CSFD_ONLY_SEARCH_LIMIT` | `20` | kolik výsledků hledání ČSFD se prověří |
+| `POSTER_FONTS` | DejaVu Sans Bold + Regular | písma pro vygenerované náhledy (čárkou oddělené cesty); když chybí, náhledy se negenerují |
 | `CSFD_CONCURRENCY` | `2` | souběžné požadavky na ČSFD |
 | `CSFD_DELAY_MS` | `500` | min. rozestup požadavků na ČSFD |
 | `ADMIN_TOKEN` | prázdné | token pro `/admin/refresh-wikidata` |

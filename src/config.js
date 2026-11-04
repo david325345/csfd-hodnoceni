@@ -39,6 +39,12 @@ export const config = {
   // a kolik výsledků hledání z ČSFD se prověří.
   csfdOnlyRecheckDays: num('CSFD_ONLY_RECHECK_DAYS', 30),
   csfdOnlySearchLimit: num('CSFD_ONLY_SEARCH_LIMIT', 20),
+  // Písmo pro vygenerované náhledy titulů bez plakátu (v Dockeru fonts-dejavu-core).
+  posterFonts: (process.env.POSTER_FONTS ||
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf,/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   // Max. stránek seznamu dílů (500 dílů na stránku).
   episodeMaxPages: num('EPISODE_MAX_PAGES', 6),
 

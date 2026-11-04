@@ -13,11 +13,14 @@ const CZSK = new Set(['cesko', 'ceskoslovensko', 'slovensko', 'ceska republika',
 /** Česká nebo slovenská produkce (podle zemí původu z ČSFD). */
 export const isCzSk = (origins) => (origins ?? []).some((o) => CZSK.has(normalize(o)));
 
-/** Větší plakát: ČSFD posílá v hledání miniaturu (w60h85), stejný soubor jde i ve w420. Zástupný obrázek = null. */
-export function posterUrl(src) {
+/**
+ * Adresa plakátu: ČSFD posílá v hledání miniaturu (w60h85), stejný soubor jde i ve w420.
+ * `size` null = velikost nechat (detail má w1080). Zástupný obrázek = null.
+ */
+export function posterUrl(src, size = 'w420') {
   if (!src || src.startsWith('data:')) return null;
   const url = src.startsWith('//') ? `https:${src}` : src;
-  return url.replace(/\/cache\/resized\/[^/]+\//, '/cache/resized/w420/');
+  return size ? url.replace(/\/cache\/resized\/[^/]+\//, `/cache/resized/${size}/`) : url;
 }
 
 /** Pomocná paralelní mapa s limitem souběhu. */
@@ -67,7 +70,7 @@ function compactDetail(m, csfdId) {
     title: m.title ?? null,
     year,
     type: m.type ?? null,
-    poster: posterUrl(m.poster),
+    poster: posterUrl(m.poster, null),
     background: m.photo ? (m.photo.startsWith('//') ? `https:${m.photo}` : m.photo) : null,
     description: (m.descriptions ?? [])[0] ?? null,
     genres: (m.genres ?? []).map((g) => (typeof g === 'string' ? g : g?.name)).filter(Boolean),
@@ -87,11 +90,13 @@ export function createCsfdOnly({
   csfdClient,
   episodes,
   searchCinemeta,
+  posterRenderer = { available: false, render: () => null },
   config,
   now = () => Date.now(),
   log = console.log
 }) {
   const deepInflight = new Set();
+  const pngCache = new Map();
   const detailInflight = new Map();
   const stats = {
     searches: 0,
@@ -103,8 +108,17 @@ export function createCsfdOnly({
     metaRequests: 0,
     metaFetches: 0,
     metaCacheHits: 0,
+    posterDetails: 0,
+    postersGenerated: 0,
     errors: 0
   };
+
+  /** Adresa vygenerovaného náhledu (jen když jde vykreslit). */
+  const generatedPoster = (csfdId, baseUrl) =>
+    posterRenderer.available && baseUrl ? `${baseUrl}/poster/csfd-${csfdId}.png` : null;
+
+  /** Plakát → fotka ze scény → vygenerovaný náhled s názvem. */
+  const posterFor = (d, csfdId, baseUrl) => d?.poster || d?.background || generatedPoster(csfdId, baseUrl);
 
   /** Zapamatuje si, že ČSFD titul má IMDb; když je pár jednoznačný a nový, uloží ho i jako vlastní pár. */
   function rememberImdb(csfdId, imdb, how, item) {
@@ -229,7 +243,7 @@ export function createCsfdOnly({
   }
 
   /** Hledání: jen tituly bez IMDb, v pořadí z ČSFD. Vrací pole Stremio meta preview. */
-  async function search(type, query) {
+  async function search(type, query, { baseUrl = '' } = {}) {
     stats.searches++;
     const q = String(query ?? '').trim();
     if (!q) return [];
@@ -240,6 +254,19 @@ export function createCsfdOnly({
         .filter((x) => Number.isFinite(x.id) && allowed.has(x.type))
         .slice(0, config.csfdOnlySearchLimit);
       const verdicts = await mapLimit(list, 4, (item) => classify(item, type));
+      // Bez plakátu ve výsledcích hledání: detail (uloží se, otevření pak bude okamžité) → fotka nebo náhled.
+      const posters = await mapLimit(list, 2, async (item, k) => {
+        if (verdicts[k] !== 'only') return null;
+        const p = posterUrl(item.poster);
+        if (p) return p;
+        stats.posterDetails++;
+        try {
+          return posterFor(await getDetail(item.id), item.id, baseUrl);
+        } catch (e) {
+          log(`[csfd-only] plakát ${item.id}: ${e.message}`);
+          return generatedPoster(item.id, baseUrl);
+        }
+      });
       const metas = [];
       list.forEach((item, k) => {
         if (verdicts[k] === 'imdb') stats.excludedImdb++;
@@ -249,7 +276,7 @@ export function createCsfdOnly({
             id: `${ID_PREFIX}${item.id}`,
             type,
             name: item.title,
-            poster: posterUrl(item.poster),
+            poster: posters[k] ?? undefined,
             releaseInfo: Number.isFinite(item.year) ? String(item.year) : undefined,
             description: (item.origins ?? []).join(' / ') || undefined
           });
@@ -264,7 +291,7 @@ export function createCsfdOnly({
   }
 
   /** Metadata pro csfd:<ID> (u seriálu s díly z ČSFD). */
-  async function meta(type, csfdId) {
+  async function meta(type, csfdId, { baseUrl = '' } = {}) {
     stats.metaRequests++;
     try {
       const d = await getDetail(csfdId);
@@ -273,8 +300,8 @@ export function createCsfdOnly({
         id: `${ID_PREFIX}${csfdId}`,
         type: series ? 'series' : 'movie',
         name: d.title,
-        poster: d.poster ?? undefined,
-        background: d.background ?? undefined,
+        poster: posterFor(d, csfdId, baseUrl) ?? undefined,
+        background: d.background || d.poster || undefined,
         description: d.description ?? undefined,
         releaseInfo: d.year ? String(d.year) : undefined,
         year: d.year ?? undefined,
@@ -315,5 +342,17 @@ export function createCsfdOnly({
     return episodes.resolveEpisodeByCsfd(csfdId, season, episode, ttlByYear(d?.year, now(), config));
   }
 
-  return { search, meta, episodeRating, getDetail, stats };
+  /** PNG náhled s názvem a rokem pro titul bez plakátu i fotky (null = nejde vykreslit). */
+  async function posterPng(csfdId) {
+    if (!posterRenderer.available) return null;
+    if (pngCache.has(csfdId)) return pngCache.get(csfdId);
+    const d = db.metaGet(csfdId)?.data ?? (await getDetail(csfdId));
+    const png = posterRenderer.render({ title: d.title, year: d.year, series: isSeriesType(d.type) });
+    stats.postersGenerated++;
+    if (pngCache.size >= 200) pngCache.delete(pngCache.keys().next().value);
+    pngCache.set(csfdId, png);
+    return png;
+  }
+
+  return { search, meta, episodeRating, getDetail, posterPng, stats };
 }

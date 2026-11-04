@@ -1,5 +1,9 @@
 FROM node:22-slim
 
+# Písmo pro vygenerované náhledy titulů bez plakátu.
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core \
+  && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 ENV NODE_ENV=production \
     DB_PATH=/data/csfd-ratings.db \

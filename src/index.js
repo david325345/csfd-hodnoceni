@@ -3,6 +3,7 @@ import { openDb } from './db.js';
 import { createCsfdClient } from './csfd.js';
 import { getMeta, getMetas, getSeriesStatus, getSeriesVideos, searchCinemeta } from './cinemeta.js';
 import { createCsfdOnly } from './csfdonly.js';
+import { createPosterRenderer } from './poster.js';
 import { createEpisodeResolver } from './episodes.js';
 import { createResolver } from './resolver.js';
 import { createRefresher } from './refresh.js';
@@ -20,7 +21,8 @@ const csfdClient = createCsfdClient({
 });
 const resolver = createResolver({ db, csfdClient, getMeta, getMetas, getSeriesStatus, config, log });
 const episodes = createEpisodeResolver({ db, csfdClient, resolver, getSeriesVideos, config, log });
-const csfdOnly = createCsfdOnly({ db, csfdClient, episodes, searchCinemeta, config, log });
+const posterRenderer = createPosterRenderer({ fontFiles: config.posterFonts });
+const csfdOnly = createCsfdOnly({ db, csfdClient, episodes, searchCinemeta, posterRenderer, config, log });
 const refresher = createRefresher({ db, config, log });
 const icon = loadIcon(config.iconPath);
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -29,6 +31,7 @@ const server = createServer({ db, resolver, episodes, csfdOnly, refresher, csfdC
 
 server.listen(config.port, () => {
   log(`[http] csfd-ratings ${version} poslouchá na portu ${config.port}, Wikidata párů: ${db.wdCount()}`);
+  log(`[poster] náhledy titulů bez plakátu: ${posterRenderer.available ? 'zapnuté' : 'vypnuté (chybí písmo nebo @resvg/resvg-js)'}`);
   log(`[addon] manifest: /manifest.json (s díly), /bez-dilu/manifest.json (bez dílů), ikona: ${icon ? config.iconPath : 'není (Nuvio ukáže hvězdičku)'}`);
 });
 

@@ -140,7 +140,7 @@ export function createServer({
         const c = parseCatalogPath(path);
         if (!c || !csfdOnly || !c.query) return send(res, 200, { metas: [] }, { 'Cache-Control': 'public, max-age=3600' });
         try {
-          const metas = await csfdOnly.search(c.type, c.query);
+          const metas = await csfdOnly.search(c.type, c.query, { baseUrl: publicBaseUrl(req, config.publicUrl) });
           return send(res, 200, { metas }, { 'Cache-Control': 'public, max-age=3600' });
         } catch (e) {
           console.error(`[catalog] ${c.type} "${c.query}": ${e.message}`);
@@ -152,12 +152,30 @@ export function createServer({
         const p = parseMetaPath(path);
         if (!p || !csfdOnly) return send(res, 404, { meta: null });
         try {
-          const meta = await csfdOnly.meta(p.type, p.csfdId);
+          const meta = await csfdOnly.meta(p.type, p.csfdId, { baseUrl: publicBaseUrl(req, config.publicUrl) });
           return send(res, 200, { meta }, { 'Cache-Control': 'public, max-age=21600' });
         } catch (e) {
           console.error(`[meta] csfd:${p.csfdId}: ${e.message}`);
           return send(res, e?.reason === 'not-found' ? 404 : 503, { meta: null }, { 'Cache-Control': 'no-store' });
         }
+      }
+
+      const pm = req.method === 'GET' && path.match(/^\/poster\/csfd-(\d{1,9})\.png$/);
+      if (pm) {
+        let png = null;
+        try {
+          png = csfdOnly ? await csfdOnly.posterPng(Number(pm[1])) : null;
+        } catch (e) {
+          console.error(`[poster] ${pm[1]}: ${e.message}`);
+        }
+        if (!png) return send(res, 404, { error: 'not found' });
+        res.writeHead(200, {
+          'Content-Type': 'image/png',
+          'Content-Length': png.length,
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=2592000'
+        });
+        return res.end(png);
       }
 
       if (req.method === 'GET' && path.startsWith('/ratings/')) {

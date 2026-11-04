@@ -243,3 +243,96 @@ test('HTTP: katalog, metadata a hodnocení csfd:', async () => {
     db.close();
   }
 });
+
+// --- plakáty: fotka místo plakátu, vygenerovaný náhled ---
+import { wrapTitle, posterSvg, createPosterRenderer } from '../src/poster.js';
+
+test('náhled: zalomení názvu, escapování, PNG', () => {
+  assert.deepEqual(wrapTitle('Historie jedné inscenace', 13, 7), ['Historie', 'jedné', 'inscenace']);
+  const long = wrapTitle('a b c d e f g h i j k l m n o p', 3, 2);
+  assert.equal(long.length, 2);
+  assert.match(long[1], /…$/);
+  const svg = posterSvg({ title: 'Tom & Jerry <test>', year: 1987, series: true });
+  assert.match(svg, />Tom &amp; Jerry</);
+  assert.match(svg, />&lt;test&gt;</);
+  assert.match(svg, />Seriál</);
+  assert.match(svg, />1987</);
+  const r = createPosterRenderer({ fontFiles: ['/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'] });
+  if (r.available) {
+    const png = r.render({ title: 'Strašidla', year: 1987, series: false });
+    assert.equal(png.subarray(1, 4).toString(), 'PNG');
+  }
+  assert.equal(createPosterRenderer({ fontFiles: ['/neexistuje.ttf'] }).available, false);
+});
+
+test('hledání a detail: bez plakátu fotka, bez fotky vygenerovaný náhled', async () => {
+  const db = openDb(':memory:');
+  const details = {
+    41: { title: 'S fotkou', year: 1987, type: 'film', poster: null, photo: '//image.pmgstatic.com/cache/resized/w1326/f41.jpg', titlesOther: [] },
+    42: { title: 'Bez ničeho', year: 1986, type: 'film', poster: null, photo: null, titlesOther: [] },
+    43: { title: 'S plakátem', year: 1980, type: 'film', poster: 'https://image.pmgstatic.com/cache/resized/w1080/p43.jpg', photo: null, titlesOther: [] }
+  };
+  const csfdClient = {
+    search: async () => ({
+      movies: [
+        { ...item(41, 'S fotkou', 1987, ['Česko']), poster: 'data:image/gif;base64,R0lG' },
+        { ...item(42, 'Bez ničeho', 1986, ['Slovensko']), poster: 'data:image/gif;base64,R0lG' },
+        item(44, 'S miniaturou', 1990, ['Česko'])
+      ],
+      tvSeries: []
+    }),
+    movie: async (id) => details[id]
+  };
+  let rendered = 0;
+  const posterRenderer = { available: true, render: () => (rendered++, Buffer.from('PNG')) };
+  const only = createCsfdOnly({
+    db,
+    csfdClient,
+    episodes: {},
+    searchCinemeta: async () => [],
+    posterRenderer,
+    config,
+    now: () => NOW,
+    log: quiet
+  });
+  const metas = await only.search('movie', 'x', { baseUrl: 'https://csfd.example.cz' });
+  assert.deepEqual(metas.map((m) => m.poster), [
+    'https://image.pmgstatic.com/cache/resized/w1326/f41.jpg',
+    'https://csfd.example.cz/poster/csfd-42.png',
+    'https://image.pmgstatic.com/cache/resized/w420/files/p/44.jpg'
+  ]);
+  assert.equal(only.stats.posterDetails, 2, 'detail jen u výsledků bez plakátu');
+
+  const m41 = await only.meta('movie', 41, { baseUrl: 'https://csfd.example.cz' });
+  assert.equal(m41.poster, 'https://image.pmgstatic.com/cache/resized/w1326/f41.jpg');
+  assert.equal(m41.background, 'https://image.pmgstatic.com/cache/resized/w1326/f41.jpg');
+  const m43 = await only.meta('movie', 43, { baseUrl: 'https://csfd.example.cz' });
+  assert.equal(m43.background, 'https://image.pmgstatic.com/cache/resized/w1080/p43.jpg', 'bez fotky plakát jako pozadí');
+  const m42 = await only.meta('movie', 42, { baseUrl: 'https://csfd.example.cz' });
+  assert.equal(m42.poster, 'https://csfd.example.cz/poster/csfd-42.png');
+  assert.equal(m42.background, undefined);
+
+  assert.equal((await only.posterPng(42)).toString(), 'PNG');
+  await only.posterPng(42);
+  assert.equal(rendered, 1, 'náhled z paměti');
+
+  const off = createCsfdOnly({ db, csfdClient, episodes: {}, searchCinemeta: async () => [], config, now: () => NOW, log: quiet });
+  assert.equal((await off.meta('movie', 42, { baseUrl: 'https://x' })).poster, undefined, 'bez písma žádný náhled');
+});
+
+test('HTTP: /poster/csfd-ID.png', async () => {
+  const db = openDb(':memory:');
+  const csfdOnly = { posterPng: async (id) => (id === 42 ? Buffer.from([0x89, 0x50, 0x4e, 0x47]) : null), stats: {} };
+  const server = createServer({ db, resolver: {}, csfdOnly, refresher: { running: false }, csfdClient: { pending: 0 }, config: { publicUrl: '' } });
+  await new Promise((ok) => server.listen(0, ok));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const r = await fetch(`${base}/poster/csfd-42.png`);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('content-type'), 'image/png');
+    assert.equal((await fetch(`${base}/poster/csfd-1.png`)).status, 404);
+  } finally {
+    await new Promise((ok) => server.close(ok));
+    db.close();
+  }
+});
