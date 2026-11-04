@@ -163,25 +163,8 @@ export function createEpisodeResolver({
       stats.listCacheHits++;
       return { list: db.episodesAll(seriesCsfd), hasSeasons: Boolean(stored.has_seasons), videos };
     }
-
-    const key = seriesCsfd;
-    if (!inflight.has(key)) {
-      inflight.set(
-        key,
-        (async () => {
-          try {
-            const d = await downloadList(seriesCsfd);
-            stats.listFetches++;
-            db.episodesReplace(seriesCsfd, d.list, d.hasSeasons, now());
-            return d;
-          } finally {
-            inflight.delete(key);
-          }
-        })()
-      );
-    }
     try {
-      const d = await inflight.get(key);
+      const d = await fetchAndStore(seriesCsfd);
       return { ...d, videos };
     } catch (e) {
       if (stored) {
@@ -189,6 +172,75 @@ export function createEpisodeResolver({
         log(`[episodes] ${seriesCsfd}: ${e.message} → vracím uložený seznam`);
         return { list: db.episodesAll(seriesCsfd), hasSeasons: Boolean(stored.has_seasons), videos };
       }
+      throw e;
+    }
+  }
+
+  /** Stáhne a uloží seznam dílů; souběžné požadavky na stejný seriál čekají na jedno stažení. */
+  function fetchAndStore(seriesCsfd) {
+    if (!inflight.has(seriesCsfd)) {
+      inflight.set(
+        seriesCsfd,
+        (async () => {
+          try {
+            const d = await downloadList(seriesCsfd);
+            stats.listFetches++;
+            db.episodesReplace(seriesCsfd, d.list, d.hasSeasons, now());
+            return d;
+          } finally {
+            inflight.delete(seriesCsfd);
+          }
+        })()
+      );
+    }
+    return inflight.get(seriesCsfd);
+  }
+
+  /**
+   * Seznam dílů podle ČSFD ID seriálu (tituly bez IMDb): z DB, když je mladší než `ttlMs`,
+   * jinak nově stažený. Vrací { list, hasSeasons }; při chybě uložený seznam, nebo chybu.
+   */
+  async function listByCsfd(seriesCsfd, ttlMs) {
+    const stored = db.episodeListGet(seriesCsfd);
+    if (stored && now() - stored.fetched_at < ttlMs) {
+      stats.listCacheHits++;
+      return { list: db.episodesAll(seriesCsfd), hasSeasons: Boolean(stored.has_seasons) };
+    }
+    try {
+      return await fetchAndStore(seriesCsfd);
+    } catch (e) {
+      if (stored) {
+        stats.staleServed++;
+        log(`[episodes] ${seriesCsfd}: ${e.message} → vracím uložený seznam`);
+        return { list: db.episodesAll(seriesCsfd), hasSeasons: Boolean(stored.has_seasons) };
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Hodnocení dílu seriálu bez IMDb (ID csfd:…:S:E). Čísla dílů pochází z našich
+   * vlastních metadat (stejný seznam z ČSFD), takže stačí přesná shoda.
+   */
+  async function resolveEpisodeByCsfd(seriesCsfd, season, episode, ttlMs) {
+    stats.requests++;
+    try {
+      if (season < 1) {
+        stats.skipped.season0++;
+        return { seriesCsfdId: seriesCsfd, reason: 'season0' };
+      }
+      const data = await listByCsfd(seriesCsfd, ttlMs);
+      if (!data.list.length) {
+        stats.skipped.emptyList++;
+        return { seriesCsfdId: seriesCsfd, reason: 'empty-list' };
+      }
+      const r = pickEpisode({ ...data, videos: null }, season, episode);
+      if (r.ep) stats.found++;
+      else if (r.reason === 'not-found') stats.skipped.notFound++;
+      else if (r.reason === 'no-rating') stats.skipped.noRating++;
+      return { seriesCsfdId: seriesCsfd, ...r };
+    } catch (e) {
+      stats.errors++;
       throw e;
     }
   }
@@ -228,5 +280,5 @@ export function createEpisodeResolver({
     }
   }
 
-  return { resolveEpisode, stats };
+  return { resolveEpisode, resolveEpisodeByCsfd, listByCsfd, stats };
 }

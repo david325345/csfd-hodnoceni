@@ -121,3 +121,19 @@ export async function getSeriesVideos(imdbId, { fetchImpl = fetch, timeoutMs = 8
   if (!isValidMeta(meta, imdbId, 'series')) return null;
   return summarizeVideos(meta.videos);
 }
+
+/**
+ * Hledání v Cinemetě podle názvu: [{ imdb, name, year }] (jen položky s IMDb ID).
+ * Používá katalog „top“ s parametrem search, stejně jako Stremio.
+ */
+export async function searchCinemeta(type, query, { fetchImpl = fetch, timeoutMs = 6_000 } = {}) {
+  const t = type === 'series' ? 'series' : 'movie';
+  const url = `https://v3-cinemeta.strem.io/catalog/${t}/top/search=${encodeURIComponent(query)}.json`;
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error(`Cinemeta HTTP ${res.status}`);
+  const metas = (await res.json())?.metas;
+  return (Array.isArray(metas) ? metas : [])
+    .map((m) => ({ imdb: m.imdb_id || m.id, name: m.name, year: firstYear(m.releaseInfo ?? m.year) }))
+    .filter((m) => /^tt\d+$/.test(m.imdb ?? '') && m.name);
+}

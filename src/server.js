@@ -5,6 +5,8 @@ import {
   episodePayload,
   episodeUrl,
   manifestPath,
+  parseCatalogPath,
+  parseMetaPath,
   parseRatingsPath,
   publicBaseUrl,
   ratingsPayload,
@@ -26,6 +28,7 @@ export function createServer({
   db,
   resolver,
   episodes = null,
+  csfdOnly = null,
   refresher,
   csfdClient,
   config,
@@ -132,18 +135,51 @@ export function createServer({
         return send(res, 200, manifest, { 'Cache-Control': 'public, max-age=3600' });
       }
 
+      // --- Tituly jen na ČSFD: hledání a metadata (csfd:ID) ---
+      if (req.method === 'GET' && path.startsWith('/catalog/')) {
+        const c = parseCatalogPath(path);
+        if (!c || !csfdOnly || !c.query) return send(res, 200, { metas: [] }, { 'Cache-Control': 'public, max-age=3600' });
+        try {
+          const metas = await csfdOnly.search(c.type, c.query);
+          return send(res, 200, { metas }, { 'Cache-Control': 'public, max-age=3600' });
+        } catch (e) {
+          console.error(`[catalog] ${c.type} "${c.query}": ${e.message}`);
+          return send(res, 200, { metas: [] }, { 'Cache-Control': 'no-store' });
+        }
+      }
+
+      if (req.method === 'GET' && path.startsWith('/meta/')) {
+        const p = parseMetaPath(path);
+        if (!p || !csfdOnly) return send(res, 404, { meta: null });
+        try {
+          const meta = await csfdOnly.meta(p.type, p.csfdId);
+          return send(res, 200, { meta }, { 'Cache-Control': 'public, max-age=21600' });
+        } catch (e) {
+          console.error(`[meta] csfd:${p.csfdId}: ${e.message}`);
+          return send(res, e?.reason === 'not-found' ? 404 : 503, { meta: null }, { 'Cache-Control': 'no-store' });
+        }
+      }
+
       if (req.method === 'GET' && path.startsWith('/ratings/')) {
         const parsed = parseRatingsPath(path);
         if (!parsed) return send(res, 200, { ratings: [] }, { 'Cache-Control': 'public, max-age=86400' });
         const isEpisode = withEpisodes && parsed.type === 'series' && parsed.season !== undefined;
+        const key = parsed.csfdId ? `csfd:${parsed.csfdId}` : parsed.imdbId;
         let payload;
         try {
-          payload = isEpisode
-            ? episodePayload(await episodes.resolveEpisode(parsed.imdbId, parsed.season, parsed.episode))
-            : ratingsPayload(await resolver.resolve(parsed.imdbId, { type: parsed.type }));
+          if (parsed.csfdId) {
+            if (!csfdOnly) payload = { ratings: [] };
+            else if (isEpisode) payload = episodePayload(await csfdOnly.episodeRating(parsed.csfdId, parsed.season, parsed.episode));
+            else if (parsed.season !== undefined) payload = { ratings: [] };
+            else payload = ratingsPayload(await resolver.ratingByCsfd(parsed.csfdId));
+          } else {
+            payload = isEpisode
+              ? episodePayload(await episodes.resolveEpisode(parsed.imdbId, parsed.season, parsed.episode))
+              : ratingsPayload(await resolver.resolve(parsed.imdbId, { type: parsed.type }));
+          }
         } catch (e) {
           // ČSFD/Cinemeta nedostupné a nic v cache — Nuvio prostě nic nezobrazí.
-          const label = isEpisode ? `${parsed.imdbId}:${parsed.season}:${parsed.episode}` : parsed.imdbId;
+          const label = isEpisode ? `${key}:${parsed.season}:${parsed.episode}` : key;
           console.error(`[ratings] ${label}: ${e.message}`);
           return send(res, 200, { ratings: [] }, { 'Cache-Control': 'no-store' });
         }
@@ -188,11 +224,15 @@ export function createServer({
             missCached: db.missCount(),
             ratingsCached: db.ratingCount(),
             episodeLists: db.episodeListStats().n,
-            episodesCached: db.episodeListStats().eps
+            episodesCached: db.episodeListStats().eps,
+            csfdChecked: db.classStats().n,
+            csfdOnly: db.classStats().only,
+            csfdMetaCached: db.metaCount()
           },
           csfdQueue: csfdClient.pending,
           resolver: resolver.stats,
-          episodes: episodes ? episodes.stats : null
+          episodes: episodes ? episodes.stats : null,
+          csfdOnly: csfdOnly ? csfdOnly.stats : null
         });
       }
 

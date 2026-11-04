@@ -14,6 +14,8 @@ export function splitVariant(path) {
   return { episodes: true, path };
 }
 
+export const CATALOG_ID = 'csfd-only';
+
 export const manifestPath = (episodes) => `${episodes ? '' : NO_EPISODES_PREFIX}/manifest.json`;
 
 /** Načte ikonu, pokud existuje. Bez ikony manifest ikonu neuvádí. */
@@ -42,13 +44,27 @@ export function buildManifest({ baseUrl, hasIcon, version, episodes = true }) {
     id: ADDON_ID,
     version,
     name: 'ČSFD hodnocení',
-    description: episodes
-      ? 'Hodnocení z ČSFD.cz podle IMDb ID (filmy, seriály a jednotlivé díly).'
-      : 'Hodnocení z ČSFD.cz podle IMDb ID (filmy a seriály).',
+    description:
+      (episodes
+        ? 'Hodnocení z ČSFD.cz podle IMDb ID (filmy, seriály a jednotlivé díly).'
+        : 'Hodnocení z ČSFD.cz podle IMDb ID (filmy a seriály).') +
+      ' Hledání titulů, které jsou jen na ČSFD.',
     types: ['movie', 'series'],
-    idPrefixes: ['tt'],
-    resources: [{ name: 'ratings', types: ['movie', 'series'], idPrefixes: ['tt'] }],
-    catalogs: [],
+    idPrefixes: ['tt', 'csfd:'],
+    resources: [
+      { name: 'ratings', types: ['movie', 'series'], idPrefixes: ['tt', 'csfd:'] },
+      { name: 'catalog', types: ['movie', 'series'] },
+      { name: 'meta', types: ['movie', 'series'], idPrefixes: ['csfd:'] }
+    ],
+    // Jen hledání (isRequired): na Home se neukazují, výsledky jsou jen tituly bez IMDb.
+    catalogs: ['movie', 'series'].map((type) => ({
+      type,
+      id: CATALOG_ID,
+      name: 'Jen na ČSFD',
+      extra: [{ name: 'search', isRequired: true }],
+      extraSupported: ['search'],
+      extraRequired: ['search']
+    })),
     ratingSources: [source],
     behaviorHints: { configurable: false }
   };
@@ -57,8 +73,8 @@ export function buildManifest({ baseUrl, hasIcon, version, episodes = true }) {
 }
 
 /**
- * Parsuje cestu /ratings/{type}/{id}.json. ID může být i díl (tt…:S:E).
- * Vrací { type, imdbId, season, episode } (season/episode jen u dílu) nebo null.
+ * Parsuje cestu /ratings/{type}/{id}.json. ID může být i díl (tt…:S:E) a titul jen na ČSFD (csfd:ID, csfd:ID:S:E).
+ * Vrací { type, imdbId | csfdId, season, episode } (season/episode jen u dílu) nebo null.
  */
 export function parseRatingsPath(path) {
   const m = path.match(/^\/ratings\/(movie|series)\/([^/]+?)\.json$/);
@@ -70,13 +86,49 @@ export function parseRatingsPath(path) {
     return null;
   }
   const imdb = id.match(/^(tt\d{5,10})(?::(\d+):(\d+))?$/);
-  if (!imdb) return null;
-  const out = { type: m[1], imdbId: imdb[1] };
-  if (imdb[2] !== undefined) {
-    out.season = Number(imdb[2]);
-    out.episode = Number(imdb[3]);
+  const cs = !imdb && id.match(/^csfd:(\d{1,9})(?::(\d+):(\d+))?$/);
+  if (!imdb && !cs) return null;
+  const hit = imdb || cs;
+  const out = imdb ? { type: m[1], imdbId: imdb[1] } : { type: m[1], csfdId: Number(cs[1]) };
+  if (hit[2] !== undefined) {
+    out.season = Number(hit[2]);
+    out.episode = Number(hit[3]);
   }
   return out;
+}
+
+/** /catalog/{type}/csfd-only/search=….json → { type, query } nebo null. */
+export function parseCatalogPath(path) {
+  const m = path.match(/^\/catalog\/(movie|series)\/([^/]+)(?:\/([^/]*))?\.json$/);
+  if (!m || m[2] !== CATALOG_ID) return null;
+  let query = '';
+  for (const part of (m[3] ?? '').split('&')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    let k, v;
+    try {
+      k = decodeURIComponent(part.slice(0, eq));
+      v = decodeURIComponent(part.slice(eq + 1).replace(/\+/g, ' '));
+    } catch {
+      return null;
+    }
+    if (k === 'search') query = v.trim();
+  }
+  return { type: m[1], query };
+}
+
+/** /meta/{type}/csfd:ID.json → { type, csfdId } nebo null. */
+export function parseMetaPath(path) {
+  const m = path.match(/^\/meta\/(movie|series)\/([^/]+?)\.json$/);
+  if (!m) return null;
+  let id;
+  try {
+    id = decodeURIComponent(m[2]);
+  } catch {
+    return null;
+  }
+  const cs = id.match(/^csfd:(\d{1,9})$/);
+  return cs ? { type: m[1], csfdId: Number(cs[1]) } : null;
 }
 
 /** Odpověď ve formátu Nuvia z výsledku resolveru. */

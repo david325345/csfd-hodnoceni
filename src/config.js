@@ -35,6 +35,10 @@ export const config = {
   ttlEpisodeOldDays: num('RATING_TTL_EPISODE_OLD_DAYS', 365),
   ttlEpisodeLastYearDays: num('RATING_TTL_EPISODE_LAST_YEAR_DAYS', 90),
   ttlEpisodeNewDays: num('RATING_TTL_EPISODE_NEW_DAYS', 3),
+  // Tituly jen na ČSFD (bez IMDb): za kolik dní znovu ověřit, jestli IMDb nepřibylo,
+  // a kolik výsledků hledání z ČSFD se prověří.
+  csfdOnlyRecheckDays: num('CSFD_ONLY_RECHECK_DAYS', 30),
+  csfdOnlySearchLimit: num('CSFD_ONLY_SEARCH_LIMIT', 20),
   // Max. stránek seznamu dílů (500 dílů na stránku).
   episodeMaxPages: num('EPISODE_MAX_PAGES', 6),
 

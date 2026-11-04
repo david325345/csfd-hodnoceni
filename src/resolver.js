@@ -289,5 +289,16 @@ export function createResolver({
     return p;
   }
 
-  return { resolve, findMatch, stats };
+  /** Hodnocení podle ČSFD ID bez IMDb (tituly jen na ČSFD). */
+  async function ratingByCsfd(csfdId) {
+    stats.requests++;
+    try {
+      return { csfdId, ...(await getRating(csfdId, null)) };
+    } catch (e) {
+      stats.errors++;
+      throw e;
+    }
+  }
+
+  return { resolve, ratingByCsfd, findMatch, stats };
 }

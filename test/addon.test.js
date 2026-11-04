@@ -21,7 +21,13 @@ test('manifest odpovídá formátu Nuvia (ratings resource + ratingSources)', ()
   const m = buildManifest({ baseUrl: 'https://csfd.example.cz', hasIcon: true, version: '1.1.0' });
   assert.equal(m.resources[0].name, 'ratings');
   assert.deepEqual(m.resources[0].types, ['movie', 'series']);
-  assert.deepEqual(m.resources[0].idPrefixes, ['tt']);
+  assert.deepEqual(m.resources[0].idPrefixes, ['tt', 'csfd:']);
+  assert.deepEqual(m.resources.map((r) => r.name), ['ratings', 'catalog', 'meta']);
+  assert.deepEqual(m.resources[2].idPrefixes, ['csfd:']);
+  assert.deepEqual(m.catalogs.map((c) => [c.type, c.id, c.extra[0].isRequired]), [
+    ['movie', 'csfd-only', true],
+    ['series', 'csfd-only', true]
+  ]);
   assert.deepEqual(m.ratingSources, [
     { source: 'csfd', name: 'ČSFD', max: 100, icon: 'https://csfd.example.cz/icon.png', episodes: true }
   ]);

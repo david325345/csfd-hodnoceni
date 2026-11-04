@@ -48,6 +48,17 @@ CREATE TABLE IF NOT EXISTS episode_rating (
   rating      REAL,
   PRIMARY KEY (series_csfd, season, episode)
 );
+CREATE TABLE IF NOT EXISTS csfd_class (
+  csfd       INTEGER PRIMARY KEY,
+  imdb       TEXT,
+  matched_by TEXT,
+  checked_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS csfd_meta (
+  csfd       INTEGER PRIMARY KEY,
+  json       TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS kv (
   key   TEXT PRIMARY KEY,
   value TEXT
@@ -69,6 +80,9 @@ export function openDb(path) {
     db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run('wd_last_full', '0');
   }
   db.exec('CREATE INDEX IF NOT EXISTS wd_map_item ON wd_map (item)');
+  // Zpětné hledání ČSFD → IMDb (katalog titulů jen na ČSFD).
+  db.exec('CREATE INDEX IF NOT EXISTS wd_map_csfd ON wd_map (csfd)');
+  db.exec('CREATE INDEX IF NOT EXISTS own_map_csfd ON own_map (csfd)');
 
   // Migrace: stav seriálu u hodnocení (verze 1.3).
   const rcols = db.prepare('PRAGMA table_info(rating)').all().map((c) => c.name);
@@ -78,6 +92,7 @@ export function openDb(path) {
 
   const prepareWd = () => ({
     wdGet: db.prepare('SELECT csfd FROM wd_map WHERE imdb = ? ORDER BY csfd'),
+    wdByCsfd: db.prepare('SELECT imdb FROM wd_map WHERE csfd = ?'),
     wdCount: db.prepare('SELECT COUNT(*) AS n FROM wd_map'),
     wdAmbiguous: db.prepare(
       'SELECT COUNT(*) AS n FROM (SELECT imdb FROM wd_map GROUP BY imdb HAVING COUNT(*) > 1)'
@@ -120,6 +135,15 @@ export function openDb(path) {
       `INSERT OR REPLACE INTO episode_rating (series_csfd, season, episode, csfd, path, title, rating)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ),
+    ownByCsfd: db.prepare('SELECT imdb FROM own_map WHERE csfd = ?'),
+    classGet: db.prepare('SELECT * FROM csfd_class WHERE csfd = ?'),
+    classPut: db.prepare('INSERT OR REPLACE INTO csfd_class (csfd, imdb, matched_by, checked_at) VALUES (?, ?, ?, ?)'),
+    classCount: db.prepare(
+      'SELECT COUNT(*) AS n, COALESCE(SUM(imdb IS NULL), 0) AS only FROM csfd_class'
+    ),
+    metaGet: db.prepare('SELECT * FROM csfd_meta WHERE csfd = ?'),
+    metaPut: db.prepare('INSERT OR REPLACE INTO csfd_meta (csfd, json, fetched_at) VALUES (?, ?, ?)'),
+    metaCount: db.prepare('SELECT COUNT(*) AS n FROM csfd_meta'),
     kvGet: db.prepare('SELECT value FROM kv WHERE key = ?'),
     kvPut: db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)'),
     ...prepareWd()
@@ -129,6 +153,10 @@ export function openDb(path) {
     raw: db,
     wdCsfdIds: (imdb) => st.wdGet.all(imdb).map((r) => r.csfd),
     wdCount: () => st.wdCount.get().n,
+    /** Všechna IMDb ID, která ukazují na dané ČSFD ID (Wikidata + vlastní páry). */
+    imdbForCsfd: (csfd) => [
+      ...new Set([...st.wdByCsfd.all(csfd), ...st.ownByCsfd.all(csfd)].map((r) => r.imdb))
+    ],
     wdAmbiguousCount: () => st.wdAmbiguous.get().n,
 
     /**
@@ -147,6 +175,7 @@ export function openDb(path) {
         db.exec('DROP TABLE wd_map');
         db.exec('ALTER TABLE wd_map_new RENAME TO wd_map');
         db.exec('CREATE INDEX IF NOT EXISTS wd_map_item ON wd_map (item)');
+        db.exec('CREATE INDEX IF NOT EXISTS wd_map_csfd ON wd_map (csfd)');
         db.exec('COMMIT');
       } catch (e) {
         db.exec('ROLLBACK');
@@ -220,6 +249,16 @@ export function openDb(path) {
         throw e;
       }
     },
+
+    classGet: (csfd) => st.classGet.get(csfd),
+    classPut: (csfd, imdb, matchedBy, ts) => st.classPut.run(csfd, imdb ?? null, matchedBy ?? null, ts),
+    classStats: () => st.classCount.get(),
+    metaGet: (csfd) => {
+      const r = st.metaGet.get(csfd);
+      return r ? { data: JSON.parse(r.json), fetched_at: r.fetched_at } : null;
+    },
+    metaPut: (csfd, data, ts) => st.metaPut.run(csfd, JSON.stringify(data), ts),
+    metaCount: () => st.metaCount.get().n,
 
     kvGet: (key) => st.kvGet.get(key)?.value ?? null,
     kvPut: (key, value) => st.kvPut.run(key, value == null ? null : String(value)),

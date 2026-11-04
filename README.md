@@ -27,6 +27,13 @@ Malá služba, která k IMDb ID vrátí hodnocení z ČSFD. Určená jako zdroj 
    - Když požadovaný díl v uloženém seznamu chybí a podle Cinemety vyšel až po posledním stažení, seznam se stáhne hned.
    - Seznam dílů node-csfd-api neumí, parser je vlastní (`src/episodes.js`). Cookie ověření proti botům bere z knihovny; když ČSFD vrátí ověření, vyřeší se stažením detailu seriálu přes knihovnu a zkusí se znovu.
 
+5. **Tituly jen na ČSFD** (bez IMDb), ID `csfd:<ČSFD ID>`, u dílu `csfd:<ID seriálu>:S:E`:
+   - Katalog „Jen na ČSFD“ (filmy i seriály) jen pro hledání (`search` je povinný, na Home se neukazuje). Dotaz jde na hledání ČSFD a vrátí jen tituly, u kterých IMDb neznáme. Tituly s IMDb se v Nuviu najdou normálně přes `tt…`.
+   - Jak se pozná titul bez IMDb: (1) pár v tabulce (Wikidata nebo vlastní), (2) hledání v Cinemetě podle českého názvu a roku ±1 (shoda se uloží jako vlastní pár, takže pak funguje i hodnocení přes IMDb), (3) česká nebo slovenská produkce bez shody = jen ČSFD; cizí titul se na pozadí ověří i podle originálních názvů z detailu a do výsledků se dostane až při dalším hledání. Výsledek „jen ČSFD“ se po 30 dnech ověří znovu.
+   - Metadata `csfd:` z detailu ČSFD (název, rok, popis, plakát, fotka, žánry, režie, herci, délka, země), u seriálu díly ze seznamu `/epizody/`. ČSFD nemá u dílů datum vysílání, všechny dostanou 1. 1. roku vzniku seriálu. Platnost podle roku jako u filmů.
+   - Hodnocení `csfd:` titulů i jejich dílů běží stejně jako u `tt…`. Stažený detail se použije i pro hodnocení, nic se nestahuje dvakrát.
+   - Streamy k `csfd:` titulům musí dodat jiné addony s `csfd:` v `idPrefixes` (Webshare, SKTorrent…). Tituly bez IMDb se nesynchronizují s Traktem ani Simkl.
+
 Na ČSFD se jde jen na vyžádání, přes frontu (max. 2 požadavky souběžně, 500 ms rozestup). Cookie anti-bot ochrany Anubis (platí ~týden, vázané na IP serveru) se ukládá do databáze, aby se po restartu nemuselo řešit znovu.
 
 Knihovna [node-csfd-api](https://github.com/bartholomej/node-csfd-api) je použitá **beze změn**, zamčená na verzi `5.13.1`. Databáze je vestavěné SQLite z Node (`node:sqlite`, Node ≥ 22.13), takže služba nemá žádné nativní závislosti. Jediná závislost je node-csfd-api.
@@ -75,6 +82,14 @@ Služba je zároveň Stremio addon s externím hodnocením ve formátu NuvioTVOS
 - Nenalezeno: `404 {"imdbId": "...", "found": false}`.
 - ČSFD nedostupné a nic v cache: `503`.
 
+### `GET /catalog/{movie|series}/csfd-only/search={dotaz}.json`
+
+Hledání titulů jen na ČSFD: `{"metas":[{"id":"csfd:12345","type":"movie","name":"…","poster":"…","releaseInfo":"1985"}]}`.
+
+### `GET /meta/{movie|series}/csfd:{ID}.json`
+
+Metadata titulu jen na ČSFD ve formátu Stremia, u seriálu s `videos` (`csfd:{ID}:S:E`).
+
 ### `GET /rating/{imdbId}?season=S&episode=E`
 
 Hodnocení dílu pro ruční kontrolu: `rating` (zaokrouhlené), `ratingExact` (jak je na ČSFD, např. 92.5), `title`, `url`, `seriesCsfdId`. Nenalezeno = `404` s `reason`: `series-not-found`, `not-series`, `season0`, `absolute`, `season-short`, `not-found`, `no-rating`, `empty-list`.
@@ -89,6 +104,8 @@ Počty párů, stav poslední obnovy Wikidat, velikost cache, fronta na ČSFD a 
 - `resolver.staleServed` — kolikrát se vrátilo starší hodnocení kvůli nedostupnému ČSFD.
 - `episodes` — dotazy na díly: `found`, `listFetches` (stažení seznamu z ČSFD), `listCacheHits`, `newEpisodeRefetch`, `staleServed`, `challengeRetries`, `skipped.*` (důvody prázdné odpovědi), `errors`. Když `skipped.emptyList` nebo `errors` výrazně roste, ČSFD nejspíš změnilo stránku se seznamem dílů.
 - `tables.episodeLists` / `episodesCached` — počet uložených seriálů a dílů.
+- `tables.csfdChecked` / `csfdOnly` / `csfdMetaCached` — prověřené ČSFD tituly, z toho bez IMDb, uložená metadata.
+- `csfdOnly` — `searches`, `results`, `excludedImdb` (vyřazené, mají IMDb), `cinemetaMatches`, `pending` (cizí tituly čekající na ověření), `deepChecks`, `metaRequests` / `metaFetches` / `metaCacheHits`, `errors`.
 
 ### `GET /health`
 
@@ -123,6 +140,8 @@ curl -X POST -H "Authorization: Bearer TOKEN" "http://localhost:7020/admin/refre
 | `RATING_TTL_EPISODE_LAST_YEAR_DAYS` | `90` | díly loňské série |
 | `RATING_TTL_EPISODE_NEW_DAYS` | `3` | díly letošní série a série bez data |
 | `EPISODE_MAX_PAGES` | `6` | max. stránek seznamu dílů (500 dílů na stránku) |
+| `CSFD_ONLY_RECHECK_DAYS` | `30` | po kolika dnech znovu ověřit, jestli titul „jen na ČSFD“ nedostal IMDb |
+| `CSFD_ONLY_SEARCH_LIMIT` | `20` | kolik výsledků hledání ČSFD se prověří |
 | `CSFD_CONCURRENCY` | `2` | souběžné požadavky na ČSFD |
 | `CSFD_DELAY_MS` | `500` | min. rozestup požadavků na ČSFD |
 | `ADMIN_TOKEN` | prázdné | token pro `/admin/refresh-wikidata` |
