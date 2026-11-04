@@ -177,7 +177,7 @@ test('metadata seriálu s díly a hodnocení z jednoho stažení detailu', async
         origins: ['Československo'],
         duration: 55,
         creators: { directors: [{ name: 'Režisér' }], actors: [{ name: 'Herec' }] },
-        titlesOther: [],
+        titlesOther: [{ country: 'Slovensko', title: 'Starý seriál SK' }],
         rating: 77,
         ratingCount: 1200
       }
@@ -189,6 +189,7 @@ test('metadata seriálu s díly a hodnocení z jednoho stažení detailu', async
   assert.equal(m.background, 'https://image.pmgstatic.com/cache/resized/w1326/files/f.jpg');
   assert.deepEqual(m.director, ['Režisér']);
   assert.equal(m.runtime, '55 min');
+  assert.deepEqual(m.titlesOther, [{ country: 'Slovensko', title: 'Starý seriál SK' }]);
   assert.deepEqual(m.videos.map((v) => [v.id, v.title]), [['csfd:500:1:1', 'Díl 1'], ['csfd:500:1:2', 'Díl 2']]);
   assert.equal(m.videos[0].released, '1975-01-01T00:00:00.000Z');
 
@@ -308,6 +309,9 @@ test('hledání a detail: bez plakátu fotka, bez fotky vygenerovaný náhled', 
   assert.equal(m41.background, 'https://image.pmgstatic.com/cache/resized/w1326/f41.jpg');
   const m43 = await only.meta('movie', 43, { baseUrl: 'https://csfd.example.cz' });
   assert.equal(m43.background, 'https://image.pmgstatic.com/cache/resized/w1080/p43.jpg', 'bez fotky plakát jako pozadí');
+  // starší uložená metadata s názvy jako řetězci
+  db.metaPut(45, { id: 45, title: 'Starý záznam', year: 1970, type: 'film', origins: [], genres: [], directors: [], actors: [], titlesOther: ['Old title'] }, NOW);
+  assert.deepEqual((await only.meta('movie', 45)).titlesOther, [{ country: null, title: 'Old title' }]);
   const m42 = await only.meta('movie', 42, { baseUrl: 'https://csfd.example.cz' });
   assert.equal(m42.poster, 'https://csfd.example.cz/poster/csfd-42.png');
   assert.equal(m42.background, undefined);

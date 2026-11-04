@@ -89,7 +89,7 @@ Hledání titulů jen na ČSFD: `{"metas":[{"id":"csfd:12345","type":"movie","na
 
 ### `GET /meta/{movie|series}/csfd:{ID}.json`
 
-Metadata titulu jen na ČSFD ve formátu Stremia, u seriálu s `videos` (`csfd:{ID}:S:E`).
+Metadata titulu jen na ČSFD ve formátu Stremia, u seriálu s `videos` (`csfd:{ID}:S:E`). Navíc `titlesOther: [{ country, title }]` s originálními a dalšími názvy z ČSFD pro addony se streamy (hledání pod slovenským nebo původním názvem).
 
 ### `GET /rating/{imdbId}?season=S&episode=E`
 

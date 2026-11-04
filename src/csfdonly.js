@@ -61,6 +61,10 @@ function ttlByYear(year, nowMs, config) {
   return days * DAY;
 }
 
+/** Další názvy jako [{ country, title }] (starší uložená metadata měla jen řetězce). */
+const otherTitles = (d) =>
+  (d?.titlesOther ?? []).map((t) => (typeof t === 'string' ? { country: null, title: t } : t)).filter((t) => t?.title);
+
 /** Zkrácený detail z node-csfd-api pro metadata a hodnocení. */
 function compactDetail(m, csfdId) {
   const names = (list, n) => (list ?? []).slice(0, n).map((p) => p.name).filter(Boolean);
@@ -78,7 +82,9 @@ function compactDetail(m, csfdId) {
     duration: Number.isFinite(Number(m.duration)) ? Number(m.duration) : null,
     directors: names(m.creators?.directors, 5),
     actors: names(m.creators?.actors, 15),
-    titlesOther: (m.titlesOther ?? []).map((t) => t.title).filter(Boolean),
+    titlesOther: (m.titlesOther ?? [])
+      .filter((t) => t?.title)
+      .map((t) => ({ country: t.country || null, title: t.title })),
     rating: Number.isFinite(m.rating) ? m.rating : null,
     ratingCount: Number.isFinite(m.ratingCount) ? m.ratingCount : null,
     colorRating: m.colorRating ?? null
@@ -203,7 +209,7 @@ export function createCsfdOnly({
     (async () => {
       try {
         const d = await getDetail(item.id);
-        const imdb = await cinemetaLookup(type, [d.title, ...d.titlesOther], d.year ?? item.year);
+        const imdb = await cinemetaLookup(type, [d.title, ...otherTitles(d).map((t) => t.title)], d.year ?? item.year);
         if (imdb) rememberImdb(item.id, imdb, 'cinemeta-alt', item);
         else db.classPut(item.id, null, 'none', now());
       } catch (e) {
@@ -310,7 +316,9 @@ export function createCsfdOnly({
         cast: d.actors,
         runtime: d.duration ? `${d.duration} min` : undefined,
         country: d.origins.join(', ') || undefined,
-        links: [{ name: 'ČSFD', category: 'ČSFD', url: `https://www.csfd.cz/film/${csfdId}/` }]
+        links: [{ name: 'ČSFD', category: 'ČSFD', url: `https://www.csfd.cz/film/${csfdId}/` }],
+        // Pro addony se streamy: originální a další názvy podle zemí (hledání pod slovenským nebo původním názvem).
+        titlesOther: otherTitles(d)
       };
       if (series) {
         let list = [];
