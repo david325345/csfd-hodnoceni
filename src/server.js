@@ -4,8 +4,10 @@ import {
   buildManifest,
   episodePayload,
   episodeUrl,
+  idPayload,
   manifestPath,
   parseCatalogPath,
+  parseIdPath,
   parseMetaPath,
   parseRatingsPath,
   publicBaseUrl,
@@ -176,6 +178,20 @@ export function createServer({
           'Cache-Control': 'public, max-age=2592000'
         });
         return res.end(png);
+      }
+
+      // ČSFD ID podle IMDb i u titulu bez hodnocení (český název pro addony se streamy)
+      if (req.method === 'GET' && path.startsWith('/csfd-id/')) {
+        const p = parseIdPath(path);
+        if (!p) return send(res, 404, { csfdId: null });
+        try {
+          const payload = idPayload(await resolver.resolve(p.imdbId, { type: p.type }));
+          const maxAge = payload.csfdId ? 86400 : 3600;
+          return send(res, 200, payload, { 'Cache-Control': `public, max-age=${maxAge}` });
+        } catch (e) {
+          console.error(`[csfd-id] ${p.imdbId}: ${e.message}`);
+          return send(res, 503, { csfdId: null }, { 'Cache-Control': 'no-store' });
+        }
       }
 
       if (req.method === 'GET' && path.startsWith('/ratings/')) {

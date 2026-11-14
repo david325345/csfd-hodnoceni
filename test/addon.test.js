@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../src/db.js';
 import { createServer } from '../src/server.js';
-import { buildManifest, parseRatingsPath, publicBaseUrl, ratingsPayload } from '../src/addon.js';
+import { buildManifest, idPayload, parseIdPath, parseRatingsPath, publicBaseUrl, ratingsPayload } from '../src/addon.js';
 
 test('parseRatingsPath: film, seriál, epizoda, neplatné', () => {
   assert.deepEqual(parseRatingsPath('/ratings/movie/tt0110912.json'), { type: 'movie', imdbId: 'tt0110912' });
@@ -163,4 +163,43 @@ test('HTTP: typ z adresy /ratings/{type}/ se předá resolveru', async () => {
     await new Promise((ok) => server.close(ok));
     db.close();
   }
+});
+
+test('parseIdPath a idPayload: ČSFD ID i bez hodnocení', () => {
+  assert.deepEqual(parseIdPath('/csfd-id/series/tt45114341.json'), { type: 'series', imdbId: 'tt45114341' });
+  assert.deepEqual(parseIdPath('/csfd-id/movie/tt0110912.json'), { type: 'movie', imdbId: 'tt0110912' });
+  assert.equal(parseIdPath('/csfd-id/tv/tt0110912.json'), null);
+  assert.equal(parseIdPath('/csfd-id/movie/csfd:123.json'), null);
+  assert.equal(parseIdPath('/csfd-id/movie/tt0110912:1:2.json'), null);
+  assert.deepEqual(idPayload({ csfdId: 1660000, row: { rating: null, title: 'Melania Rea', year: 2026 } }),
+    { csfdId: 1660000, title: 'Melania Rea', year: 2026 });
+  assert.deepEqual(idPayload({ csfdId: 8852, row: { rating: 91 } }), { csfdId: 8852, title: null, year: null });
+  assert.deepEqual(idPayload(null), { csfdId: null });
+});
+
+test('HTTP: /csfd-id vrátí ID i u titulu bez hodnocení, chyba = 503', async () => {
+  const seen = [];
+  const r = {
+    async resolve(id, opts) {
+      seen.push([id, opts?.type]);
+      if (id === 'tt45114341') return { csfdId: 1660000, row: { rating: null, title: 'Melania Rea', year: 2026 } };
+      if (id === 'tt0000500') throw new Error('ČSFD blocked');
+      return null;
+    }
+  };
+  await withServer({ resolver: r }, async (base) => {
+    const ok = await fetch(`${base}/csfd-id/series/tt45114341.json`);
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), { csfdId: 1660000, title: 'Melania Rea', year: 2026 });
+    assert.match(ok.headers.get('cache-control'), /max-age=86400/);
+    const rated = await fetch(`${base}/ratings/series/tt45114341.json`);
+    assert.deepEqual(await rated.json(), { ratings: [] });
+    const none = await fetch(`${base}/csfd-id/movie/tt0000001.json`);
+    assert.deepEqual(await none.json(), { csfdId: null });
+    assert.match(none.headers.get('cache-control'), /max-age=3600/);
+    const err = await fetch(`${base}/csfd-id/movie/tt0000500.json`);
+    assert.equal(err.status, 503);
+    assert.equal((await fetch(`${base}/csfd-id/movie/kitsu:1.json`)).status, 404);
+    assert.deepEqual(seen.filter((x) => x[0] === 'tt45114341')[0], ['tt45114341', 'series']);
+  });
 });

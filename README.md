@@ -91,6 +91,10 @@ Hledání titulů jen na ČSFD: `{"metas":[{"id":"csfd:12345","type":"movie","na
 
 Metadata titulu jen na ČSFD ve formátu Stremia, u seriálu s `videos` (`csfd:{ID}:S:E`). Navíc `titlesOther: [{ country, title }]` s originálními a dalšími názvy z ČSFD pro addony se streamy (hledání pod slovenským nebo původním názvem).
 
+### `GET /csfd-id/{movie|series}/{tt…}.json`
+
+ČSFD ID k IMDb ID i u titulu, který na ČSFD ještě nemá hodnocení (`/ratings` pak vrací prázdný seznam): `{"csfdId":1660000,"title":"…","year":2026}`, nenalezeno `{"csfdId":null}`, výpadek ČSFD nebo Cinemety `503`. Používají ho addony se streamy (Webshare), aby k titulu bez českého názvu na TMDB vzaly český název z `/meta/{type}/csfd:{ID}.json`.
+
 ### `GET /rating/{imdbId}?season=S&episode=E`
 
 Hodnocení dílu pro ruční kontrolu: `rating` (zaokrouhlené), `ratingExact` (jak je na ČSFD, např. 92.5), `title`, `url`, `seriesCsfdId`. Nenalezeno = `404` s `reason`: `series-not-found`, `not-series`, `season0`, `absolute`, `season-short`, `not-found`, `no-rating`, `empty-list`.

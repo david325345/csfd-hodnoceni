@@ -97,6 +97,21 @@ export function parseRatingsPath(path) {
   return out;
 }
 
+/** /csfd-id/{type}/tt….json → { type, imdbId } nebo null. */
+export function parseIdPath(path) {
+  const m = path.match(/^\/csfd-id\/(movie|series)\/(tt\d{5,10})\.json$/);
+  return m ? { type: m[1], imdbId: m[2] } : null;
+}
+
+/**
+ * ČSFD ID k IMDb ID i bez hodnocení (addony se streamy berou podle něj český název z /meta).
+ * Výsledek resolveru → { csfdId, title, year }, nenalezeno → { csfdId: null }.
+ */
+export function idPayload(result) {
+  if (!result || !Number.isFinite(result.csfdId)) return { csfdId: null };
+  return { csfdId: result.csfdId, title: result.row?.title ?? null, year: result.row?.year ?? null };
+}
+
 /** /catalog/{type}/csfd-only/search=….json → { type, query } nebo null. */
 export function parseCatalogPath(path) {
   const m = path.match(/^\/catalog\/(movie|series)\/([^/]+)(?:\/([^/]*))?\.json$/);
