@@ -65,6 +65,17 @@ function ttlByYear(year, nowMs, config) {
 const otherTitles = (d) =>
   (d?.titlesOther ?? []).map((t) => (typeof t === 'string' ? { country: null, title: t } : t)).filter((t) => t?.title);
 
+/**
+ * Platnost uložených metadat (názvy, popis, obrázky): 2 a víc let staré tituly napořád
+ * (CSFD_META_TTL_OLD_DAYS=0), novější podle roku jako u filmů — český název
+ * přibývá kolem premiéry.
+ */
+export function metaTtlMs(year, nowMs, config) {
+  const age = Number.isFinite(year) && year > 0 ? new Date(nowMs).getUTCFullYear() - year : -1;
+  if (age >= 2) return config.metaTtlOldDays > 0 ? config.metaTtlOldDays * DAY : Infinity;
+  return ttlByYear(year, nowMs, config);
+}
+
 /** Zkrácený detail z node-csfd-api pro metadata a hodnocení. */
 function compactDetail(m, csfdId) {
   const names = (list, n) => (list ?? []).slice(0, n).map((p) => p.name).filter(Boolean);
@@ -161,7 +172,7 @@ export function createCsfdOnly({
   /** Detail z ČSFD (z DB, nebo nově stažený). Uloží i hodnocení, aby se nestahovalo zvlášť. */
   async function getDetail(csfdId) {
     const cached = db.metaGet(csfdId);
-    if (cached && now() - cached.fetched_at < ttlByYear(cached.data.year, now(), config)) {
+    if (cached && now() - cached.fetched_at < metaTtlMs(cached.data.year, now(), config)) {
       stats.metaCacheHits++;
       return cached.data;
     }

@@ -4,7 +4,7 @@ import { openDb } from '../src/db.js';
 import { createServer } from '../src/server.js';
 import { createResolver } from '../src/resolver.js';
 import { createEpisodeResolver } from '../src/episodes.js';
-import { createCsfdOnly, isCzSk, posterUrl, pickCinemetaHit } from '../src/csfdonly.js';
+import { createCsfdOnly, isCzSk, posterUrl, pickCinemetaHit, metaTtlMs } from '../src/csfdonly.js';
 import { parseCatalogPath, parseMetaPath, parseRatingsPath } from '../src/addon.js';
 
 const DAY = 86400_000;
@@ -23,7 +23,8 @@ const config = {
   ttlEpisodeNewDays: 3,
   episodeMaxPages: 6,
   csfdOnlyRecheckDays: 30,
-  csfdOnlySearchLimit: 20
+  csfdOnlySearchLimit: 20,
+  metaTtlOldDays: 0
 };
 
 test('pomocné funkce: země, plakát, shoda v Cinemetě', () => {
@@ -357,4 +358,31 @@ test('detail u titulu s IMDb nepřepíše stav seriálu z Cinemety', async () =>
   assert.equal(r600.rating, 80, 'hodnocení se obnovilo');
   await s.only.getDetail(601);
   assert.equal(s.db.ratingGet(601).series_status, 'ended', 'bez IMDb: starý seriál = ukončený');
+});
+
+test('platnost metadat: staré napořád, loňské 90 dní, letošní 3 dny', () => {
+  assert.equal(metaTtlMs(1987, NOW, config), Infinity);
+  assert.equal(metaTtlMs(2024, NOW, config), Infinity);
+  assert.equal(metaTtlMs(2025, NOW, config), 90 * DAY);
+  assert.equal(metaTtlMs(2026, NOW, config), 3 * DAY);
+  assert.equal(metaTtlMs(null, NOW, config), 3 * DAY);
+  assert.equal(metaTtlMs(1987, NOW, { ...config, metaTtlOldDays: 365 }), 365 * DAY);
+});
+
+test('metadata starého titulu se po letech nestahují znovu, letošního ano', async () => {
+  const s = setup({
+    results: { movies: [], tvSeries: [] },
+    details: {
+      700: { title: 'Starý film', year: 1975, type: 'film', titlesOther: [] },
+      701: { title: 'New Film', year: 2026, type: 'film', titlesOther: [] }
+    }
+  });
+  await s.only.getDetail(700);
+  await s.only.getDetail(701);
+  s.tick(5 * DAY);
+  await s.only.getDetail(701);
+  assert.equal(s.calls.movie, 3, 'letošní po 5 dnech znovu (český název)');
+  s.tick(800 * DAY);
+  await s.only.getDetail(700);
+  assert.equal(s.calls.movie, 3, 'starý z DB i po letech');
 });

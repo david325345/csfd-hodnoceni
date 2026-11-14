@@ -39,6 +39,8 @@ export const config = {
   // a kolik výsledků hledání z ČSFD se prověří.
   csfdOnlyRecheckDays: num('CSFD_ONLY_RECHECK_DAYS', 30),
   csfdOnlySearchLimit: num('CSFD_ONLY_SEARCH_LIMIT', 20),
+  // Metadata (/meta) titulů 2+ let starých: 0 = napořád, jinak počet dní.
+  metaTtlOldDays: num('CSFD_META_TTL_OLD_DAYS', 0),
   // Písmo pro vygenerované náhledy titulů bez plakátu (v Dockeru fonts-dejavu-core).
   posterFonts: (process.env.POSTER_FONTS ||
     '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf,/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
