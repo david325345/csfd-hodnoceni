@@ -174,6 +174,16 @@ export function createCsfdOnly({
             stats.metaFetches++;
             db.metaPut(csfdId, d, now());
             const old = Number.isFinite(d.year) && new Date(now()).getUTCFullYear() - d.year >= 2;
+            const prev = db.ratingGet(csfdId);
+            // Stav seriálu: u titulů s IMDb ho určuje Cinemeta (zachovat), jen u titulů
+            // bez IMDb se staré seriály berou jako ukončené.
+            const series = db.imdbForCsfd(csfdId).length
+              ? {
+                  series_status: prev?.series_status ?? null,
+                  series_end_year: prev?.series_end_year ?? null,
+                  status_checked_at: prev?.status_checked_at ?? null
+                }
+              : { series_status: isSeriesType(d.type) && old ? 'ended' : null };
             db.ratingPut({
               csfd: csfdId,
               rating: d.rating,
@@ -183,8 +193,7 @@ export function createCsfdOnly({
               year: d.year,
               type: d.type,
               fetched_at: now(),
-              // Seriály bez IMDb nemají stav z Cinemety: staré se berou jako ukončené.
-              series_status: isSeriesType(d.type) && old ? 'ended' : null
+              ...series
             });
             return d;
           } finally {

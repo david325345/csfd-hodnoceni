@@ -340,3 +340,21 @@ test('HTTP: /poster/csfd-ID.png', async () => {
     db.close();
   }
 });
+
+test('detail u titulu s IMDb nepřepíše stav seriálu z Cinemety', async () => {
+  const s = setup({
+    results: { movies: [], tvSeries: [] },
+    details: {
+      600: { title: 'Běžící seriál', year: 2019, type: 'series', titlesOther: [], rating: 80 },
+      601: { title: 'Starý bez IMDb', year: 1980, type: 'series', titlesOther: [], rating: 70 }
+    }
+  });
+  s.db.replaceWdMap([['tt7000600', 600]]);
+  s.db.ratingPut({ csfd: 600, rating: 79, title: 'Běžící seriál', year: 2019, type: 'series', fetched_at: NOW - DAY, series_status: 'continuing', series_end_year: null, status_checked_at: NOW - DAY });
+  await s.only.getDetail(600);
+  const r600 = s.db.ratingGet(600);
+  assert.equal(r600.series_status, 'continuing', 'stav z Cinemety zůstal');
+  assert.equal(r600.rating, 80, 'hodnocení se obnovilo');
+  await s.only.getDetail(601);
+  assert.equal(s.db.ratingGet(601).series_status, 'ended', 'bez IMDb: starý seriál = ukončený');
+});
